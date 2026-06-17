@@ -1,0 +1,18 @@
+20:32:43 [INFO   ] vscodegrid: 日志文件: d:\Kanki_Projects\projects\py2026\Windows\logs\debug_20260617_203243.log
+20:32:43 [INFO   ] vscodegrid: 日志级别: DEBUG
+20:32:43 [DEBUG  ] vscodegrid: faulthandler 已启用
+20:32:43 [INFO   ] vscodegrid: ============================================================
+20:32:43 [INFO   ] vscodegrid: VSCode 网格容器 — 调试模式启动
+20:32:43 [INFO   ] vscodegrid: Python: 3.12.2 (tags/v3.12.2:6abddd9, Feb  6 2024, 21:26:36) [MSC v.1937 64 bit (AMD64)]
+20:32:43 [INFO   ] vscodegrid: 工作目录: D:\Kanki_Projects\projects\py2026\Windows
+20:32:43 [INFO   ] vscodegrid: ============================================================
+20:32:43 [DEBUG  ] vscodegrid: Qt 消息处理器已安装
+20:32:43 [DEBUG  ] vscodegrid: win32_utils 打点完成
+20:32:43 [DEBUG  ] vscodegrid: vscode_manager 打点完成
+20:32:43 [DEBUG  ] vscodegrid: EmbedCell 打点完成
+20:32:43 [DEBUG  ] vscodegrid: GridWindow 打点完成
+20:32:43 [ERROR  ] vscodegrid: 导入业务模块失败
+Traceback (most recent call last):
+  File "d:\Kanki_Projects\projects\py2026\Windows\debug.py", line 243, in main
+    from main import apply_dark_palette
+ImportError: cannot import name 'apply_dark_palette' from 'main' (d:\Kanki_Projects\projects\py2026\Windows\main.py)

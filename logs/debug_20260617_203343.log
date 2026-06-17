@@ -1,0 +1,91 @@
+20:33:43 [INFO   ] vscodegrid: 日志文件: d:\Kanki_Projects\projects\py2026\Windows\logs\debug_20260617_203343.log
+20:33:43 [INFO   ] vscodegrid: 日志级别: DEBUG
+20:33:43 [DEBUG  ] vscodegrid: faulthandler 已启用
+20:33:43 [INFO   ] vscodegrid: ============================================================
+20:33:43 [INFO   ] vscodegrid: VSCode 网格容器 — 调试模式启动
+20:33:43 [INFO   ] vscodegrid: Python: 3.12.2 (tags/v3.12.2:6abddd9, Feb  6 2024, 21:26:36) [MSC v.1937 64 bit (AMD64)]
+20:33:43 [INFO   ] vscodegrid: 工作目录: D:\Kanki_Projects\projects\py2026\Windows
+20:33:43 [INFO   ] vscodegrid: ============================================================
+20:33:43 [DEBUG  ] vscodegrid: Qt 消息处理器已安装
+20:33:43 [DEBUG  ] vscodegrid: win32_utils 打点完成
+20:33:43 [DEBUG  ] vscodegrid: vscode_manager 打点完成
+20:33:43 [DEBUG  ] vscodegrid: EmbedCell 打点完成
+20:33:43 [DEBUG  ] vscodegrid: GridWindow 打点完成
+20:33:43 [INFO   ] vscodegrid: QApplication 已创建，应用深色主题
+20:33:43 [DEBUG  ] vscodegrid: → GridWindow.apply_grid('2 x 2 (4)')
+20:33:43 [DEBUG  ] vscodegrid: → GridWindow.apply_grid('2 x 2 (4)')
+20:33:43 [INFO   ] vscodegrid: 主窗口已显示
+20:33:43 [INFO   ] vscodegrid: 进入事件循环
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:43 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:44 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:45 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:46 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.enforce()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.detach()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.detach()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.detach()
+20:33:47 [DEBUG  ] vscodegrid: → EmbedCell.detach()
+20:33:47 [INFO   ] vscodegrid: 事件循环结束，退出码 0

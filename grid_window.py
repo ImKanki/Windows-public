@@ -1,7 +1,12 @@
-"""网格主窗口：布局、网格尺寸切换、启动 VSCode、拖拽换位/吸附、窗口管理。"""
-from PySide6.QtCore import QTimer
+# -*- coding: utf-8 -*-
+"""网格主窗口：布局、网格切换、启动 VSCode、拖拽换位/吸附/释放、巡检、窗口管理。"""
+import copy
+import ctypes
+
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -13,13 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 import icons
+import styles
 import vscode_manager
 import win32_utils
+from config import DEFAULT_CFG, color, font_size, icon_size
 from drag_watcher import DragWatcher
 from embed_cell import EmbedCell
 from settings_dialog import SettingsDialog
 
-# 预设网格：名称 -> (行, 列)
 GRID_PRESETS = {
     "1 x 2": (1, 2),
     "2 x 2 (4)": (2, 2),
@@ -34,94 +40,230 @@ MAX_CELLS = 16
 class GridWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VSCode 窗口网格容器")
-        self.resize(1400, 900)
+        self.cfg = copy.deepcopy(DEFAULT_CFG)
         self.cells = []
         self.rows = 0
         self.cols = 0
 
+        self.setWindowTitle(self.cfg["window_title"])
+        self.resize(self.cfg["win_w"], self.cfg["win_h"])
+
         central = QWidget()
-        central.setStyleSheet("background: #1e1e1e;")
         self.setCentralWidget(central)
-
         root = QVBoxLayout(central)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
 
-        # 工具栏
         root.addWidget(self._build_toolbar())
 
-        # 网格容器（占据剩余全部空间）
         self.grid_container = QWidget()
         self.grid = QGridLayout(self.grid_container)
-        self.grid.setSpacing(4)
+        self.grid.setSpacing(6)
         self.grid.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self.grid_container, 1)
 
-        self.combo.setCurrentText("2 x 2 (4)")
-        self.apply_grid("2 x 2 (4)")
+        start = self.cfg["default_grid"]
+        if start not in GRID_PRESETS:
+            start = "2 x 2 (4)"
+        self.combo.setCurrentText(start)
+        self.apply_grid(start)
 
-        # 全局拖拽吸附
         self.watcher = DragWatcher(self)
         self.watcher.hover.connect(self._on_drag_hover)
         self.watcher.drop.connect(self._on_drag_drop)
+        self.watcher.timer.setInterval(self.cfg["watcher_interval"])
         self.watcher.start()
+
+        self.enforce_timer = QTimer(self)
+        self.enforce_timer.setInterval(self.cfg["enforce_interval"])
+        self.enforce_timer.timeout.connect(self._enforce_all)
+        self.enforce_timer.start()
+
+        self._dark_titlebar()
+
+    def _dark_titlebar(self):
+        try:
+            hwnd = int(self.winId())
+            value = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 20, ctypes.byref(value), ctypes.sizeof(value)
+            )
+        except Exception:
+            pass
+
+    # ---- 工具栏 ----
+    def _vsep(self):
+        sep = QFrame()
+        sep.setObjectName("tbSep")
+        sep.setFixedWidth(1)
+        sep.setFixedHeight(22)
+        return sep
 
     def _build_toolbar(self):
         bar = QWidget()
-        bar.setFixedHeight(40)
-        bar.setStyleSheet(
-            "QLabel { color: #cccccc; }"
-            "QComboBox { background: #3a3d41; color: #eee; border: 1px solid #555;"
-            " border-radius: 3px; padding: 2px 6px; }"
-            "QComboBox QAbstractItemView { background: #2d2d30; color: #eee;"
-            " selection-background-color: #094771; }"
-            "QPushButton { background: #3a3d41; color: #eee; border: 1px solid #555;"
-            " border-radius: 3px; padding: 4px 10px; }"
-            "QPushButton:hover { background: #4a4d51; }"
-        )
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(6)
+        bar.setObjectName("toolbar")
+        self.toolbar = bar
+        self._seps = []
 
-        layout.addWidget(QLabel("网格："))
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 8, 16, 8)
+        layout.setSpacing(10)
+
+        # Logo 徽章：图标 + 标题包进一个整体
+        self.logo = QWidget()
+        self.logo.setObjectName("logoBadge")
+        logo_lay = QHBoxLayout(self.logo)
+        logo_lay.setContentsMargins(10, 5, 12, 5)
+        logo_lay.setSpacing(8)
+
+        self.tb_app_icon = QLabel()
+        self.tb_app_icon.setObjectName("logoIcon")
+        logo_lay.addWidget(self.tb_app_icon)
+
+        self.tb_title = QLabel("VSCode 网格")
+        self.tb_title.setObjectName("logoText")
+        logo_lay.addWidget(self.tb_title)
+
+        layout.addWidget(self.logo)
+
+        layout.addSpacing(4)
+        sep1 = self._vsep()
+        self._seps.append(sep1)
+        layout.addWidget(sep1)
+
+        self.tb_grid_label = QLabel("网格布局")
+        self.tb_grid_label.setObjectName("fieldLabel")
+        layout.addWidget(self.tb_grid_label)
+
         self.combo = QComboBox()
         self.combo.addItems(GRID_PRESETS.keys())
         self.combo.currentTextChanged.connect(self.apply_grid)
         layout.addWidget(self.combo)
 
-        btn_fill = QPushButton(" 启动并填满空槽")
-        btn_fill.setIcon(icons.make_icon("add"))
-        btn_fill.clicked.connect(self.fill_empty_cells)
-        layout.addWidget(btn_fill)
+        layout.addSpacing(4)
+        sep2 = self._vsep()
+        self._seps.append(sep2)
+        layout.addWidget(sep2)
+        layout.addSpacing(4)
 
-        btn_scan = QPushButton(" 扫描已有窗口")
-        btn_scan.setIcon(icons.make_icon("scanning"))
-        btn_scan.clicked.connect(self.scan_and_attach)
-        layout.addWidget(btn_scan)
+        self.btn_fill = QPushButton("  填满空槽")
+        self.btn_fill.setObjectName("primary")
+        self.btn_fill.clicked.connect(self.fill_empty_cells)
+        layout.addWidget(self.btn_fill)
 
-        btn_settings = QPushButton(" 设置")
-        btn_settings.setIcon(icons.make_icon("setting"))
-        btn_settings.clicked.connect(self.open_settings)
-        layout.addWidget(btn_settings)
+        self.btn_scan = QPushButton("  扫描窗口")
+        self.btn_scan.clicked.connect(self.scan_and_attach)
+        layout.addWidget(self.btn_scan)
+
+        self.btn_settings = QPushButton("  设置")
+        self.btn_settings.clicked.connect(self.open_settings)
+        layout.addWidget(self.btn_settings)
 
         layout.addStretch(1)
 
-        hint = QLabel("拖动 VSCode 标题栏可吸附入槽 · 拖动槽位标题可换位 · 双击空槽启动新实例")
-        hint.setStyleSheet("color: #888;")
-        layout.addWidget(hint)
+        self.tb_hint = QLabel(
+            "拖标题栏到外部松手＝释放　·　拖到其它槽＝换位　·　双击空槽新建"
+        )
+        self.tb_hint.setObjectName("hintLabel")
+        layout.addWidget(self.tb_hint)
 
+        self._apply_toolbar_config()
         return bar
 
+    def _apply_toolbar_config(self):
+        self.toolbar.setFixedHeight(self.cfg["toolbar_height"])
+
+        af = font_size(self.cfg, "app_title")
+        bf = font_size(self.cfg, "button")
+        hf = font_size(self.cfg, "hint")
+
+        tb_bg = color(self.cfg, "toolbar_bg", "#16213e")
+        tb_border = color(self.cfg, "toolbar_border", "#243056")
+        self.toolbar.setStyleSheet(
+            f"QWidget#toolbar {{ background:{tb_bg};"
+            f" border:1px solid {tb_border}; border-radius:10px; }}"
+        )
+
+        for sep in self._seps:
+            sep.setStyleSheet(f"background:{tb_border};")
+
+        grad_a = color(self.cfg, "logo_grad_start", "#1f6f5c")
+        grad_b = color(self.cfg, "logo_grad_end", "#2a8a72")
+        logo_text = color(self.cfg, "logo_text", "#ffffff")
+        # 图标 label 背景透明，透出 logo 矩形底色，跟随渐变一起变
+        self.logo.setStyleSheet(
+            "QWidget#logoBadge {"
+            f" background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+            f" stop:0 {grad_a}, stop:1 {grad_b});"
+            " border-radius:8px; }"
+            " QLabel#logoIcon { background:transparent; }"
+            f" QLabel#logoText {{ background:transparent; color:{logo_text};"
+            f" font-size:{af}px; font-weight:bold; }}"
+        )
+        self.tb_grid_label.setStyleSheet(
+            f"QLabel#fieldLabel {{ color:#8a93b8; font-size:{bf}px;"
+            " background:transparent; }"
+        )
+        self.tb_hint.setStyleSheet(
+            f"QLabel#hintLabel {{ color:#5a6488; font-size:{hf}px;"
+            " background:transparent; }"
+        )
+
+        # 按钮配色
+        btn_bg = color(self.cfg, "btn_bg", "#2a3a6a")
+        btn_hover = color(self.cfg, "btn_hover", "#34457e")
+        pri_bg = color(self.cfg, "btn_primary", "#1f6f5c")
+        pri_hover = color(self.cfg, "btn_primary_hover", "#2a8a72")
+        normal_qss = (
+            f"QPushButton {{ background:{btn_bg}; color:#e8e8e8; border:none;"
+            f" padding:7px 14px; border-radius:5px; font-size:{bf}px; }}"
+            f"QPushButton:hover {{ background:{btn_hover}; }}"
+        )
+        primary_qss = (
+            f"QPushButton {{ background:{pri_bg}; color:#ffffff; border:none;"
+            f" padding:7px 14px; border-radius:5px; font-size:{bf}px; }}"
+            f"QPushButton:hover {{ background:{pri_hover}; }}"
+        )
+        self.btn_scan.setStyleSheet(normal_qss)
+        self.btn_settings.setStyleSheet(normal_qss)
+        self.btn_fill.setStyleSheet(primary_qss)
+
+        # 图标
+        ai = icon_size(self.cfg, "app_icon")
+        ti = icon_size(self.cfg, "toolbar")
+        keep = color(self.cfg, "logo_icon_keep", False)
+        logo_icon_color = None if keep else color(self.cfg, "logo_icon", "#ffffff")
+        pm = icons.make_pixmap("layout", logo_icon_color, ai)
+        if pm is not None:
+            self.tb_app_icon.setPixmap(pm)
+
+        btn_icon = color(self.cfg, "btn_icon", "#cfd6ea")
+        pri_icon = color(self.cfg, "btn_primary_icon", "#eafff7")
+        for btn, name, col in (
+            (self.btn_fill, "add", pri_icon),
+            (self.btn_scan, "search", btn_icon),
+            (self.btn_settings, "setting", btn_icon),
+        ):
+            btn.setIcon(icons.make_icon(name, col, ti))
+            btn.setIconSize(QSize(ti, ti))
+
+    # ---- 配置刷新（debug 调用）----
+    def apply_config(self):
+        self.setWindowTitle(self.cfg["window_title"])
+        self._apply_toolbar_config()
+        for cell in self.cells:
+            cell.apply_config()
+        self.enforce_timer.setInterval(self.cfg["enforce_interval"])
+        self.watcher.timer.setInterval(self.cfg["watcher_interval"])
+
+    # ---- 网格 ----
     def apply_grid(self, preset_name):
         rows, cols = GRID_PRESETS[preset_name]
         new_count = rows * cols
 
-        # 缩小网格时，超出部分的窗口释放回独立窗口
         for cell in self.cells[new_count:]:
             cell.detach()
 
-        # 清空旧布局占位与拉伸
         while self.grid.count():
             item = self.grid.takeAt(0)
             w = item.widget()
@@ -142,9 +284,10 @@ class GridWindow(QMainWindow):
                 cell = old_cells[i]
                 cell.set_index(i)
             else:
-                cell = EmbedCell(i)
+                cell = EmbedCell(i, self.cfg)
                 cell.requestSwap.connect(self.swap_cells)
                 cell.requestLaunch.connect(self.launch_into_cell)
+                cell.requestRelease.connect(self.release_cell)
             self.cells.append(cell)
             self.grid.addWidget(cell, i // cols, i % cols)
 
@@ -153,7 +296,6 @@ class GridWindow(QMainWindow):
         for c in range(cols):
             self.grid.setColumnStretch(c, 1)
 
-        # 布局生效后多打几拍，确保嵌入窗口填满新尺寸
         QTimer.singleShot(0, self._reposition_all)
         QTimer.singleShot(120, self._reposition_all)
         QTimer.singleShot(300, self._reposition_all)
@@ -161,6 +303,10 @@ class GridWindow(QMainWindow):
     def _reposition_all(self):
         for cell in self.cells:
             cell.reposition()
+
+    def _enforce_all(self):
+        for cell in self.cells:
+            cell.enforce()
 
     # ---- 拖拽吸附回调 ----
     def _on_drag_hover(self, index):
@@ -229,7 +375,7 @@ class GridWindow(QMainWindow):
             if cell.child_hwnd is None:
                 cell.attach(available.pop(0))
 
-    # ---- 窗口管理（供设置对话框调用）----
+    # ---- 窗口管理 ----
     def release_cell(self, index):
         if 0 <= index < len(self.cells):
             self.cells[index].detach()
@@ -252,7 +398,25 @@ class GridWindow(QMainWindow):
         dlg = SettingsDialog(self)
         dlg.exec()
 
+    # ---- debug 用统计 ----
+    def usage_stats(self):
+        embedded = [c for c in self.cells if c.child_hwnd]
+        lines = [
+            f"网格: {self.rows} x {self.cols}（共 {len(self.cells)} 格）",
+            f"已嵌入窗口: {len(embedded)}",
+            "-" * 30,
+        ]
+        for c in self.cells:
+            if c.child_hwnd:
+                lines.append(
+                    f"[{c.index + 1}] {win32_utils.get_window_title(c.child_hwnd)}"
+                )
+            else:
+                lines.append(f"[{c.index + 1}] （空）")
+        return "\n".join(lines)
+
     def closeEvent(self, event):
+        self.enforce_timer.stop()
         self.watcher.stop()
         for cell in self.cells:
             cell.detach()

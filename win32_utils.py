@@ -1,4 +1,4 @@
-"""Win32 窗口操作封装：查找 VSCode 窗口、嵌入/释放、定位、关闭。"""
+"""Win32 窗口操作封装：查找 VSCode 窗口、嵌入/释放、定位、关闭、巡检。"""
 import win32api
 import win32con
 import win32gui
@@ -22,13 +22,11 @@ SWP_NOZORDER = 0x0004
 SWP_FRAMECHANGED = 0x0020
 SWP_SHOWWINDOW = 0x0040
 
-# VSCode 主窗口的类名
 VSCODE_WINDOW_CLASS = "Chrome_WidgetWin_1"
 VSCODE_PROCESS_NAME = "code.exe"
 
 
 def get_process_name(pid):
-    """根据 pid 获取进程可执行文件名（小写 basename）。"""
     try:
         handle = win32api.OpenProcess(
             win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
@@ -50,7 +48,6 @@ def get_window_title(hwnd):
 
 
 def is_vscode_window(hwnd):
-    """判断一个顶层窗口是否是 VSCode 主窗口。"""
     if not hwnd or not win32gui.IsWindow(hwnd):
         return False
     if not win32gui.IsWindowVisible(hwnd):
@@ -69,7 +66,6 @@ def is_vscode_window(hwnd):
 
 
 def find_vscode_windows():
-    """枚举系统中所有 VSCode 主窗口，返回 [(hwnd, title), ...]。"""
     results = []
 
     def _enum(hwnd, _):
@@ -88,24 +84,67 @@ def get_window_rect(hwnd):
         return None
 
 
+def get_parent(hwnd):
+    try:
+        return win32gui.GetParent(hwnd)
+    except Exception:
+        return 0
+
+
+def is_window(hwnd):
+    try:
+        return bool(hwnd) and win32gui.IsWindow(hwnd)
+    except Exception:
+        return False
+
+
+def _apply_child_style(hwnd):
+    """去掉标题栏/边框/最大化等，转为子窗口样式。"""
+    style = win32gui.GetWindowLong(hwnd, GWL_STYLE)
+    style &= ~WS_CAPTION
+    style &= ~WS_THICKFRAME
+    style &= ~WS_POPUP
+    style &= ~WS_MAXIMIZEBOX
+    style &= ~WS_MINIMIZEBOX
+    style |= WS_CHILD
+    win32gui.SetWindowLong(hwnd, GWL_STYLE, style)
+
+
 def embed_window(child_hwnd, parent_hwnd):
     """把 child_hwnd 嵌入到 parent_hwnd。返回原始 style 以便恢复。"""
     original_style = win32gui.GetWindowLong(child_hwnd, GWL_STYLE)
-
-    new_style = original_style
-    new_style &= ~WS_CAPTION
-    new_style &= ~WS_THICKFRAME
-    new_style &= ~WS_POPUP
-    new_style |= WS_CHILD
-    win32gui.SetWindowLong(child_hwnd, GWL_STYLE, new_style)
-
+    _apply_child_style(child_hwnd)
     win32gui.SetParent(child_hwnd, parent_hwnd)
     return original_style
 
 
+def enforce_embed(child_hwnd, parent_hwnd, width, height):
+    """巡检：确保窗口仍是该父容器的子窗口并填满。
+
+    返回 True 表示窗口仍有效，False 表示窗口已不存在。
+    """
+    if not is_window(child_hwnd):
+        return False
+    try:
+        if win32gui.GetParent(child_hwnd) != parent_hwnd:
+            # 被最大化/还原冲出去了，重新吸附
+            _apply_child_style(child_hwnd)
+            win32gui.SetParent(child_hwnd, parent_hwnd)
+            win32gui.MoveWindow(child_hwnd, 0, 0, max(1, width), max(1, height), True)
+            return True
+        # parent 正确：仅在尺寸不符时纠正，避免无谓重绘
+        rect = win32gui.GetClientRect(child_hwnd)
+        cur_w = rect[2] - rect[0]
+        cur_h = rect[3] - rect[1]
+        if abs(cur_w - width) > 2 or abs(cur_h - height) > 2:
+            win32gui.MoveWindow(child_hwnd, 0, 0, max(1, width), max(1, height), True)
+    except Exception:
+        pass
+    return True
+
+
 def release_window(child_hwnd, original_style):
-    """把窗口从父容器释放回桌面，恢复为独立窗口。"""
-    if not child_hwnd or not win32gui.IsWindow(child_hwnd):
+    if not is_window(child_hwnd):
         return
     try:
         win32gui.SetParent(child_hwnd, 0)
@@ -114,10 +153,10 @@ def release_window(child_hwnd, original_style):
         win32gui.SetWindowPos(
             child_hwnd,
             0,
-            100,
-            100,
-            900,
-            650,
+            120,
+            120,
+            960,
+            680,
             SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
         )
         win32gui.ShowWindow(child_hwnd, win32con.SW_SHOW)
@@ -126,8 +165,7 @@ def release_window(child_hwnd, original_style):
 
 
 def resize_embedded(child_hwnd, x, y, width, height):
-    """调整已嵌入窗口在父容器内的位置和大小。"""
-    if not child_hwnd or not win32gui.IsWindow(child_hwnd):
+    if not is_window(child_hwnd):
         return
     try:
         win32gui.MoveWindow(child_hwnd, x, y, max(1, width), max(1, height), True)
@@ -136,8 +174,7 @@ def resize_embedded(child_hwnd, x, y, width, height):
 
 
 def close_window(hwnd):
-    """向窗口发送关闭消息（正常关闭，VSCode 可能弹出未保存提示）。"""
-    if hwnd and win32gui.IsWindow(hwnd):
+    if is_window(hwnd):
         try:
             win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
         except Exception:
@@ -145,21 +182,15 @@ def close_window(hwnd):
 
 
 def force_close_window(hwnd):
-    """只强制关闭这一个窗口（不杀进程）。
-
-    VSCode 多个窗口共用同一个主进程，杀进程会连带关闭全部窗口，
-    因此这里只对目标窗口连发 WM_CLOSE，强制它单独关闭。
-    """
-    if not hwnd or not win32gui.IsWindow(hwnd):
+    """只强制关闭这一个窗口（不杀进程，避免连带关闭其它 VSCode 窗口）。"""
+    if not is_window(hwnd):
         return
     try:
-        # 先脱离父容器，避免容器侧残留
         win32gui.SetParent(hwnd, 0)
     except Exception:
         pass
     try:
         win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-        # 再补发一次，应对第一次被未保存提示拦截后的状态
         win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
     except Exception:
         pass

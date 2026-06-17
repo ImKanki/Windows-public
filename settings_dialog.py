@@ -1,4 +1,5 @@
-"""设置 / 窗口管理对话框：按序号列出已嵌入窗口，处理卡死窗口。"""
+# -*- coding: utf-8 -*-
+"""设置 / 窗口管理对话框：按序号列出已嵌入窗口，处理卡死窗口。继承全局 STYLE。"""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 import icons
+import styles
 import win32_utils
 
 
@@ -19,28 +21,24 @@ class SettingsDialog(QDialog):
         super().__init__(grid_window)
         self.gw = grid_window
         self.setWindowTitle("设置 / 窗口管理")
-        self.resize(480, 400)
-        self.setStyleSheet(
-            "QDialog { background: #252526; }"
-            "QLabel { color: #dddddd; }"
-            "QPushButton { background: #3a3d41; color: #eee; border: 1px solid #555;"
-            " border-radius: 3px; padding: 4px 8px; }"
-            "QPushButton:hover { background: #4a4d51; }"
-        )
+        self.resize(540, 440)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
 
         tip = QLabel(
-            "按序号列出已嵌入的窗口。某个窗口卡死时，点对应行：\n"
-            "释放=变回独立窗口；关闭=正常关闭；强制关闭=只强行关掉这一个窗口。\n"
-            "注意：VSCode 多个窗口共用一个进程，无法用杀进程方式只结束单个窗口。"
+            "按序号列出已嵌入的窗口。某个窗口卡死时，点对应行的按钮：\n"
+            "释放 = 变回独立窗口    关闭 = 正常关闭    强制关闭 = 只强行关这一个\n"
+            "注意：VSCode 多窗口共用一个进程，无法用杀进程方式只结束单个窗口。"
         )
         tip.setWordWrap(True)
+        tip.setStyleSheet("color:#9aa3c0; font-size:12px;")
         root.addWidget(tip)
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
-        self.list_layout.setContentsMargins(0, 6, 0, 0)
+        self.list_layout.setContentsMargins(0, 4, 0, 0)
         self.list_layout.setSpacing(6)
         root.addWidget(self.list_host)
 
@@ -68,25 +66,29 @@ class SettingsDialog(QDialog):
 
         embedded = [c for c in self.gw.cells if c.child_hwnd]
         if not embedded:
-            self.list_layout.addWidget(QLabel("当前没有已嵌入的窗口。"))
+            empty = QLabel("当前没有已嵌入的窗口。")
+            empty.setStyleSheet("color:#6f7aa0;")
+            self.list_layout.addWidget(empty)
             return
 
         for cell in embedded:
             row = QWidget()
+            row.setStyleSheet("background:#16213e; border-radius:5px;")
             h = QHBoxLayout(row)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(6)
+            h.setContentsMargins(8, 6, 8, 6)
+            h.setSpacing(8)
 
             num = QLabel(str(cell.index + 1))
-            num.setFixedWidth(26)
-            num.setAlignment(Qt.AlignCenter)
+            num.setFixedSize(22, 22)
+            num.setAlignment(Qt.AlignmentFlag.AlignCenter)
             num.setStyleSheet(
-                "color: #fff; background: #094771; border-radius: 3px; padding: 3px;"
+                f"color:{styles.GOLD}; background:{styles.BADGE_BG};"
+                " border-radius:11px; font-weight:bold;"
             )
             h.addWidget(num)
 
             title = QLabel(win32_utils.get_window_title(cell.child_hwnd))
-            title.setStyleSheet("color: #ccc;")
+            title.setStyleSheet("color:#cfcfe0;")
             h.addWidget(title, 1)
 
             b_rel = QPushButton(" 释放")
@@ -100,7 +102,7 @@ class SettingsDialog(QDialog):
             h.addWidget(b_close)
 
             b_force = QPushButton(" 强制关闭")
-            b_force.setIcon(icons.make_icon("warning", "#e06c4f"))
+            b_force.setIcon(icons.make_icon("warning", "#e0833f"))
             b_force.clicked.connect(lambda _, i=cell.index: self._do(i, "force"))
             h.addWidget(b_force)
 
@@ -117,7 +119,7 @@ class SettingsDialog(QDialog):
                 "确认强制关闭",
                 "将强行关闭这一个窗口，未保存内容可能丢失。是否继续？",
             )
-            if r != QMessageBox.Yes:
+            if r != QMessageBox.StandardButton.Yes:
                 return
             self.gw.force_close_cell(index)
         self.refresh()
