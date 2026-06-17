@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -40,25 +41,22 @@ class GridWindow(QMainWindow):
         self.cols = 0
 
         central = QWidget()
+        central.setStyleSheet("background: #1e1e1e;")
         self.setCentralWidget(central)
-        root = QHBoxLayout(central)
+
+        root = QVBoxLayout(central)
         root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(6)
 
-        toolbar = self._build_toolbar()
+        # 工具栏
+        root.addWidget(self._build_toolbar())
 
+        # 网格容器（占据剩余全部空间）
         self.grid_container = QWidget()
         self.grid = QGridLayout(self.grid_container)
         self.grid.setSpacing(4)
         self.grid.setContentsMargins(0, 0, 0, 0)
-
-        outer = QWidget()
-        v = QGridLayout(outer)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.addWidget(toolbar, 0, 0)
-        v.addWidget(self.grid_container, 1, 0)
-        v.setRowStretch(1, 1)
-
-        root.addWidget(outer)
+        root.addWidget(self.grid_container, 1)
 
         self.combo.setCurrentText("2 x 2 (4)")
         self.apply_grid("2 x 2 (4)")
@@ -72,8 +70,19 @@ class GridWindow(QMainWindow):
     def _build_toolbar(self):
         bar = QWidget()
         bar.setFixedHeight(40)
+        bar.setStyleSheet(
+            "QLabel { color: #cccccc; }"
+            "QComboBox { background: #3a3d41; color: #eee; border: 1px solid #555;"
+            " border-radius: 3px; padding: 2px 6px; }"
+            "QComboBox QAbstractItemView { background: #2d2d30; color: #eee;"
+            " selection-background-color: #094771; }"
+            "QPushButton { background: #3a3d41; color: #eee; border: 1px solid #555;"
+            " border-radius: 3px; padding: 4px 10px; }"
+            "QPushButton:hover { background: #4a4d51; }"
+        )
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(6)
 
         layout.addWidget(QLabel("网格："))
         self.combo = QComboBox()
@@ -108,14 +117,20 @@ class GridWindow(QMainWindow):
         rows, cols = GRID_PRESETS[preset_name]
         new_count = rows * cols
 
+        # 缩小网格时，超出部分的窗口释放回独立窗口
         for cell in self.cells[new_count:]:
             cell.detach()
 
+        # 清空旧布局占位与拉伸
         while self.grid.count():
             item = self.grid.takeAt(0)
             w = item.widget()
             if w:
                 w.setParent(None)
+        for r in range(self.grid.rowCount()):
+            self.grid.setRowStretch(r, 0)
+        for c in range(self.grid.columnCount()):
+            self.grid.setColumnStretch(c, 0)
 
         old_cells = self.cells
         self.cells = []
@@ -138,7 +153,10 @@ class GridWindow(QMainWindow):
         for c in range(cols):
             self.grid.setColumnStretch(c, 1)
 
-        QTimer.singleShot(80, self._reposition_all)
+        # 布局生效后多打几拍，确保嵌入窗口填满新尺寸
+        QTimer.singleShot(0, self._reposition_all)
+        QTimer.singleShot(120, self._reposition_all)
+        QTimer.singleShot(300, self._reposition_all)
 
     def _reposition_all(self):
         for cell in self.cells:
@@ -223,11 +241,11 @@ class GridWindow(QMainWindow):
                 win32_utils.close_window(cell.child_hwnd)
                 cell.clear_slot()
 
-    def kill_cell(self, index):
+    def force_close_cell(self, index):
         if 0 <= index < len(self.cells):
             cell = self.cells[index]
             if cell.child_hwnd:
-                win32_utils.force_kill_window(cell.child_hwnd)
+                win32_utils.force_close_window(cell.child_hwnd)
                 cell.clear_slot()
 
     def open_settings(self):

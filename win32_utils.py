@@ -1,4 +1,4 @@
-"""Win32 窗口操作封装：查找 VSCode 窗口、嵌入/释放、定位、关闭/强杀。"""
+"""Win32 窗口操作封装：查找 VSCode 窗口、嵌入/释放、定位、关闭。"""
 import win32api
 import win32con
 import win32gui
@@ -144,14 +144,22 @@ def close_window(hwnd):
             pass
 
 
-def force_kill_window(hwnd):
-    """根据窗口所属进程强制结束（用于卡死无响应的窗口）。"""
-    if not hwnd:
+def force_close_window(hwnd):
+    """只强制关闭这一个窗口（不杀进程）。
+
+    VSCode 多个窗口共用同一个主进程，杀进程会连带关闭全部窗口，
+    因此这里只对目标窗口连发 WM_CLOSE，强制它单独关闭。
+    """
+    if not hwnd or not win32gui.IsWindow(hwnd):
         return
     try:
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        handle = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, pid)
-        win32api.TerminateProcess(handle, 0)
-        win32api.CloseHandle(handle)
+        # 先脱离父容器，避免容器侧残留
+        win32gui.SetParent(hwnd, 0)
+    except Exception:
+        pass
+    try:
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        # 再补发一次，应对第一次被未保存提示拦截后的状态
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
     except Exception:
         pass

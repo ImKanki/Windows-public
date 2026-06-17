@@ -31,8 +31,9 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
 
         tip = QLabel(
-            "下面按序号列出已嵌入的窗口。某个窗口卡死时，点对应行：\n"
-            "释放=变回独立窗口；关闭=正常关闭；强杀=直接结束进程（未保存内容会丢失）。"
+            "按序号列出已嵌入的窗口。某个窗口卡死时，点对应行：\n"
+            "释放=变回独立窗口；关闭=正常关闭；强制关闭=只强行关掉这一个窗口。\n"
+            "注意：VSCode 多个窗口共用一个进程，无法用杀进程方式只结束单个窗口。"
         )
         tip.setWordWrap(True)
         root.addWidget(tip)
@@ -98,10 +99,10 @@ class SettingsDialog(QDialog):
             b_close.clicked.connect(lambda _, i=cell.index: self._do(i, "close"))
             h.addWidget(b_close)
 
-            b_kill = QPushButton(" 强杀")
-            b_kill.setIcon(icons.make_icon("warning", "#e06c4f"))
-            b_kill.clicked.connect(lambda _, i=cell.index: self._do(i, "kill"))
-            h.addWidget(b_kill)
+            b_force = QPushButton(" 强制关闭")
+            b_force.setIcon(icons.make_icon("warning", "#e06c4f"))
+            b_force.clicked.connect(lambda _, i=cell.index: self._do(i, "force"))
+            h.addWidget(b_force)
 
             self.list_layout.addWidget(row)
 
@@ -110,13 +111,13 @@ class SettingsDialog(QDialog):
             self.gw.release_cell(index)
         elif action == "close":
             self.gw.close_cell(index)
-        elif action == "kill":
+        elif action == "force":
             r = QMessageBox.question(
                 self,
-                "确认强制结束",
-                "强制结束会直接杀掉该 VSCode 进程，未保存内容会丢失。是否继续？",
+                "确认强制关闭",
+                "将强行关闭这一个窗口，未保存内容可能丢失。是否继续？",
             )
             if r != QMessageBox.Yes:
                 return
-            self.gw.kill_cell(index)
+            self.gw.force_close_cell(index)
         self.refresh()

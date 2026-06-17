@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -14,6 +15,21 @@ import icons
 import win32_utils
 
 HEADER_HEIGHT = 28
+
+
+class HostWidget(QWidget):
+    """嵌入窗口的承载区。自身尺寸一变就回调，确保嵌入窗口实时填满。"""
+
+    def __init__(self, on_resize, parent=None):
+        super().__init__(parent)
+        self._on_resize = on_resize
+        self.setAttribute(Qt.WA_NativeWindow, True)
+        self.setStyleSheet("background: #252526;")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._on_resize()
 
 
 class DragHeader(QWidget):
@@ -95,6 +111,8 @@ class EmbedCell(QFrame):
         self.setAcceptDrops(True)
         self.setObjectName("embedCell")
         self.setStyleSheet(self.NORMAL_STYLE)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(120, 90)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -104,9 +122,7 @@ class EmbedCell(QFrame):
         self.header.btn_close.clicked.connect(self._on_close_clicked)
         layout.addWidget(self.header)
 
-        self.host = QWidget(self)
-        self.host.setAttribute(Qt.WA_NativeWindow, True)
-        self.host.setStyleSheet("background: #252526;")
+        self.host = HostWidget(self.reposition, self)
         layout.addWidget(self.host, 1)
 
         self.placeholder = QLabel(
@@ -122,9 +138,6 @@ class EmbedCell(QFrame):
         self.index = index
         self.header.index = index
         self._update_header()
-
-    def set_title(self, text):
-        self.header.title.setText(text)
 
     def _update_header(self):
         if self.child_hwnd is None:
@@ -145,6 +158,7 @@ class EmbedCell(QFrame):
         self.original_style = win32_utils.embed_window(hwnd, parent_hwnd)
         self.placeholder.hide()
         self._update_header()
+        self.reposition()
         QTimer.singleShot(50, self.reposition)
 
     def detach(self):
@@ -156,7 +170,7 @@ class EmbedCell(QFrame):
         self._update_header()
 
     def clear_slot(self):
-        """仅清空槽位记录（用于窗口已被关闭/杀掉的情况），不再恢复窗口。"""
+        """仅清空槽位记录（窗口已被关闭的情况），不再恢复窗口。"""
         self.child_hwnd = None
         self.original_style = None
         self.placeholder.show()
@@ -178,12 +192,14 @@ class EmbedCell(QFrame):
             parent_hwnd = int(self.host.winId())
             win32_utils.embed_window(hwnd, parent_hwnd)
             self.placeholder.hide()
+            self.reposition()
             QTimer.singleShot(50, self.reposition)
         else:
             self.placeholder.show()
         self._update_header()
 
     def reposition(self):
+        self.placeholder.resize(self.host.size())
         if self.child_hwnd is None:
             return
         win32_utils.resize_embedded(
@@ -194,11 +210,6 @@ class EmbedCell(QFrame):
         self.setStyleSheet(self.HOVER_STYLE if on else self.NORMAL_STYLE)
 
     # ---- 事件 ----
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.placeholder.resize(self.host.size())
-        self.reposition()
-
     def mouseDoubleClickEvent(self, event):
         if self.child_hwnd is None:
             self.requestLaunch.emit(self.index)
