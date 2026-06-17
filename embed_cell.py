@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""单个网格槽位：承载嵌入的 VSCode 窗口，支持拖出释放、拖入换位、巡检。"""
+"""单个网格槽位：承载嵌入的外部窗口，支持拖出释放、拖入换位、巡检。"""
 from PySide6.QtCore import Qt, QMimeData, QSize, QTimer, Signal
 from PySide6.QtGui import QColor, QDrag, QPainter, QPixmap
 from PySide6.QtWidgets import (
@@ -192,7 +192,7 @@ class EmbedCell(QFrame):
         self.host = HostWidget(self.reposition, self)
         layout.addWidget(self.host, 1)
 
-        self.placeholder = QLabel("把 VSCode 窗口拖到这里\n或双击启动新实例", self.host)
+        self.placeholder = QLabel("把外部窗口拖到这里\n或双击选择窗口", self.host)
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setStyleSheet("color:#566080; font-size:13px;")
 

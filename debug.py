@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """调试工具：停靠面板实时调字体/图标/尺寸/颜色/行为，并把配置保存回 config.py。"""
-import pprint
+import json
 import re
 import sys
 
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
+import win32_utils
 from grid_window import GRID_PRESETS, GridWindow
 from styles import STYLE
 
@@ -74,6 +75,7 @@ class ColorButton(QPushButton):
         self.clicked.connect(self._pick)
 
     def _refresh(self):
+        # 用文字显示色值，背景填该色，自动选黑/白前景
         c = QColor(self._value)
         fg = "#000000" if c.lightnessF() > 0.6 else "#ffffff"
         self.setText(self._value)
@@ -279,7 +281,7 @@ class DebugPanel(QDockWidget):
 
     def _save_config(self):
         path = config.__file__
-        body = pprint.pformat(self.win.cfg, indent=4, width=100, sort_dicts=False)
+        body = json.dumps(self.win.cfg, indent=4, ensure_ascii=False)
         new_block = (
             "# === CONFIG START (debug 工具会覆盖这一段，请勿手改) ===\n"
             "DEFAULT_CFG = " + body + "\n"
@@ -309,6 +311,8 @@ def main():
     win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, panel)
     win.resize(win.cfg["win_w"] + 360, win.cfg["win_h"])
     win.show()
+    win32_utils.register_own_hwnd(int(win.winId()))
+    win32_utils.register_own_hwnd(int(panel.winId()))
 
     sys.exit(app.exec())
 

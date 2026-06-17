@@ -1,10 +1,9 @@
-"""Win32 窗口操作封装：查找 VSCode 窗口、嵌入/释放、定位、关闭、巡检。"""
+"""Win32 窗口操作封装：识别可嵌入窗口、嵌入/释放、定位、关闭、巡检。"""
 import win32api
 import win32con
 import win32gui
 import win32process
 
-# 窗口样式常量
 GWL_STYLE = -16
 GWL_EXSTYLE = -20
 WS_CHILD = 0x40000000
@@ -22,8 +21,29 @@ SWP_NOZORDER = 0x0004
 SWP_FRAMECHANGED = 0x0020
 SWP_SHOWWINDOW = 0x0040
 
-VSCODE_WINDOW_CLASS = "Chrome_WidgetWin_1"
-VSCODE_PROCESS_NAME = "code.exe"
+# 永不嵌入的窗口类名（系统外壳、输入法等）
+_BLOCKED_CLASSES = {
+    "Progman",                 # 桌面
+    "WorkerW",
+    "Shell_TrayWnd",           # 任务栏
+    "Shell_SecondaryTrayWnd",
+    "Windows.UI.Core.CoreWindow",
+    "ApplicationFrameWindow",  # UWP 外壳（嵌入会异常）
+    "ForegroundStaging",
+    "MultitaskingViewFrame",
+    "XamlExplorerHostIslandWindow",
+}
+
+# 由主程序在启动时登记自己的窗口句柄，避免把容器/面板嵌进自身
+_own_hwnds = set()
+
+
+def register_own_hwnd(hwnd):
+    """登记本程序自己的窗口，扫描/拖拽时排除它们。"""
+    try:
+        _own_hwnds.add(int(hwnd))
+    except Exception:
+        pass
 
 
 def get_process_name(pid):
@@ -47,41 +67,11 @@ def get_window_title(hwnd):
         return ""
 
 
-def is_vscode_window(hwnd):
-    if not hwnd or not win32gui.IsWindow(hwnd):
-        return False
-    if not win32gui.IsWindowVisible(hwnd):
-        return False
+def is_window(hwnd):
     try:
-        cls = win32gui.GetClassName(hwnd)
+        return bool(hwnd) and win32gui.IsWindow(hwnd)
     except Exception:
         return False
-    if cls != VSCODE_WINDOW_CLASS:
-        return False
-    title = get_window_title(hwnd)
-    if not title:
-        return False
-    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-    return get_process_name(pid) == VSCODE_PROCESS_NAME
-
-
-def find_vscode_windows():
-    results = []
-
-    def _enum(hwnd, _):
-        if is_vscode_window(hwnd):
-            results.append((hwnd, get_window_title(hwnd)))
-        return True
-
-    win32gui.EnumWindows(_enum, None)
-    return results
-
-
-def get_window_rect(hwnd):
-    try:
-        return win32gui.GetWindowRect(hwnd)
-    except Exception:
-        return None
 
 
 def get_parent(hwnd):
@@ -91,15 +81,72 @@ def get_parent(hwnd):
         return 0
 
 
-def is_window(hwnd):
+def is_embeddable_window(hwnd):
+    """通用判断：是否是一个可以被嵌入的普通顶层应用窗口。"""
+    if not hwnd or not win32gui.IsWindow(hwnd):
+        return False
+    if not win32gui.IsWindowVisible(hwnd):
+        return False
+    if int(hwnd) in _own_hwnds:
+        return False
+    # 已经是别人的子窗口
+    if win32gui.GetParent(hwnd):
+        return False
+    # 有归属窗口的多为对话框/弹窗
     try:
-        return bool(hwnd) and win32gui.IsWindow(hwnd)
+        if win32gui.GetWindow(hwnd, win32con.GW_OWNER):
+            return False
+    except Exception:
+        pass
+
+    try:
+        cls = win32gui.GetClassName(hwnd)
     except Exception:
         return False
+    if cls in _BLOCKED_CLASSES:
+        return False
+
+    title = get_window_title(hwnd)
+    if not title:
+        return False
+
+    ex = win32gui.GetWindowLong(hwnd, GWL_EXSTYLE)
+    if ex & WS_EX_TOOLWINDOW:
+        return False
+
+    return True
+
+
+def find_embeddable_windows():
+    """枚举当前所有可嵌入的顶层窗口，返回 [(hwnd, title), ...]。"""
+    results = []
+
+    def _enum(hwnd, _):
+        if is_embeddable_window(hwnd):
+            results.append((hwnd, get_window_title(hwnd)))
+        return True
+
+    win32gui.EnumWindows(_enum, None)
+    return results
+
+
+# 兼容旧接口：原来调用 find_vscode_windows / is_vscode_window 的地方继续可用
+def is_vscode_window(hwnd):
+    return is_embeddable_window(hwnd)
+
+
+def find_vscode_windows():
+    return find_embeddable_windows()
+
+
+def get_window_rect(hwnd):
+    try:
+        return win32gui.GetWindowRect(hwnd)
+    except Exception:
+        return None
 
 
 def _apply_child_style(hwnd):
-    """去掉标题栏/边框/最大化等，转为子窗口样式。"""
     style = win32gui.GetWindowLong(hwnd, GWL_STYLE)
     style &= ~WS_CAPTION
     style &= ~WS_THICKFRAME
@@ -111,7 +158,6 @@ def _apply_child_style(hwnd):
 
 
 def embed_window(child_hwnd, parent_hwnd):
-    """把 child_hwnd 嵌入到 parent_hwnd。返回原始 style 以便恢复。"""
     original_style = win32gui.GetWindowLong(child_hwnd, GWL_STYLE)
     _apply_child_style(child_hwnd)
     win32gui.SetParent(child_hwnd, parent_hwnd)
@@ -119,20 +165,14 @@ def embed_window(child_hwnd, parent_hwnd):
 
 
 def enforce_embed(child_hwnd, parent_hwnd, width, height):
-    """巡检：确保窗口仍是该父容器的子窗口并填满。
-
-    返回 True 表示窗口仍有效，False 表示窗口已不存在。
-    """
     if not is_window(child_hwnd):
         return False
     try:
         if win32gui.GetParent(child_hwnd) != parent_hwnd:
-            # 被最大化/还原冲出去了，重新吸附
             _apply_child_style(child_hwnd)
             win32gui.SetParent(child_hwnd, parent_hwnd)
             win32gui.MoveWindow(child_hwnd, 0, 0, max(1, width), max(1, height), True)
             return True
-        # parent 正确：仅在尺寸不符时纠正，避免无谓重绘
         rect = win32gui.GetClientRect(child_hwnd)
         cur_w = rect[2] - rect[0]
         cur_h = rect[3] - rect[1]
@@ -182,7 +222,6 @@ def close_window(hwnd):
 
 
 def force_close_window(hwnd):
-    """只强制关闭这一个窗口（不杀进程，避免连带关闭其它 VSCode 窗口）。"""
     if not is_window(hwnd):
         return
     try:

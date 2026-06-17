@@ -41,7 +41,7 @@ def color(cfg, key, default="#ffffff"):
 
 # === CONFIG START (debug 工具会覆盖这一段，请勿手改) ===
 DEFAULT_CFG = {
-    "window_title": "VSCode 容器",
+    "window_title": "通用窗口网格容器",
     "win_w": 1440,
     "win_h": 920,
     "default_grid": "2 x 2 (4)",

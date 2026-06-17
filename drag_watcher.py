@@ -1,7 +1,7 @@
-"""全局拖拽监听：把外部 VSCode 窗口拖入容器空槽时吸附嵌入。
+"""全局拖拽监听：把外部普通窗口拖入容器空槽时吸附嵌入。
 
 原理（轮询）：
-- 左键按下瞬间，若前台窗口是未嵌入的 VSCode 窗口，记为候选。
+- 左键按下瞬间，若前台窗口是未嵌入的可嵌入普通窗口，记为候选。
 - 拖动过程中若该窗口位置发生明显移动，才判定为"正在拖动窗口"，
   以此避免在编辑器内选择文字被误判。
 - 拖动中根据光标所在的空槽屏幕区域发出 hover 高亮信号。
@@ -70,7 +70,7 @@ class DragWatcher(QObject):
 
         if down and not self.was_down:
             fg = win32gui.GetForegroundWindow()
-            if win32_utils.is_vscode_window(fg) and not self._is_embedded(fg):
+            if win32_utils.is_embeddable_window(fg) and not self._is_embedded(fg):
                 self.candidate = fg
                 self.start_rect = win32_utils.get_window_rect(fg)
                 self.moving = False

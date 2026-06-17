@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""网格主窗口：布局、网格切换、启动 VSCode、拖拽换位/吸附/释放、巡检、窗口管理。"""
+"""网格主窗口：通用窗口容器。布局、网格切换、拖拽吸附/换位/释放、巡检、窗口管理。"""
 import copy
 import ctypes
 
-from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtCore import QSize, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -18,13 +19,12 @@ from PySide6.QtWidgets import (
 )
 
 import icons
-import styles
-import vscode_manager
 import win32_utils
 from config import DEFAULT_CFG, color, font_size, icon_size
 from drag_watcher import DragWatcher
 from embed_cell import EmbedCell
 from settings_dialog import SettingsDialog
+from window_picker import WindowPicker
 
 GRID_PRESETS = {
     "1 x 2": (1, 2),
@@ -80,6 +80,8 @@ class GridWindow(QMainWindow):
         self.enforce_timer.start()
 
         self._dark_titlebar()
+        # 登记自身窗口，避免扫描/拖拽把容器自己嵌进去
+        win32_utils.register_own_hwnd(int(self.winId()))
 
     def _dark_titlebar(self):
         try:
@@ -109,7 +111,6 @@ class GridWindow(QMainWindow):
         layout.setContentsMargins(12, 8, 16, 8)
         layout.setSpacing(10)
 
-        # Logo 徽章：图标 + 标题包进一个整体
         self.logo = QWidget()
         self.logo.setObjectName("logoBadge")
         logo_lay = QHBoxLayout(self.logo)
@@ -120,7 +121,7 @@ class GridWindow(QMainWindow):
         self.tb_app_icon.setObjectName("logoIcon")
         logo_lay.addWidget(self.tb_app_icon)
 
-        self.tb_title = QLabel("VSCode 网格")
+        self.tb_title = QLabel("窗口网格")
         self.tb_title.setObjectName("logoText")
         logo_lay.addWidget(self.tb_title)
 
@@ -146,12 +147,12 @@ class GridWindow(QMainWindow):
         layout.addWidget(sep2)
         layout.addSpacing(4)
 
-        self.btn_fill = QPushButton("  填满空槽")
+        self.btn_fill = QPushButton("  嵌入窗口")
         self.btn_fill.setObjectName("primary")
-        self.btn_fill.clicked.connect(self.fill_empty_cells)
+        self.btn_fill.clicked.connect(self.pick_and_fill)
         layout.addWidget(self.btn_fill)
 
-        self.btn_scan = QPushButton("  扫描窗口")
+        self.btn_scan = QPushButton("  扫描填充")
         self.btn_scan.clicked.connect(self.scan_and_attach)
         layout.addWidget(self.btn_scan)
 
@@ -162,7 +163,7 @@ class GridWindow(QMainWindow):
         layout.addStretch(1)
 
         self.tb_hint = QLabel(
-            "拖标题栏到外部松手＝释放　·　拖到其它槽＝换位　·　双击空槽新建"
+            "拖窗口标题栏入槽　·　双击空槽选择窗口　·　拖标题栏到外部松手＝释放"
         )
         self.tb_hint.setObjectName("hintLabel")
         layout.addWidget(self.tb_hint)
@@ -190,7 +191,6 @@ class GridWindow(QMainWindow):
         grad_a = color(self.cfg, "logo_grad_start", "#1f6f5c")
         grad_b = color(self.cfg, "logo_grad_end", "#2a8a72")
         logo_text = color(self.cfg, "logo_text", "#ffffff")
-        # 图标 label 背景透明，透出 logo 矩形底色，跟随渐变一起变
         self.logo.setStyleSheet(
             "QWidget#logoBadge {"
             f" background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
@@ -209,7 +209,6 @@ class GridWindow(QMainWindow):
             " background:transparent; }"
         )
 
-        # 按钮配色
         btn_bg = color(self.cfg, "btn_bg", "#2a3a6a")
         btn_hover = color(self.cfg, "btn_hover", "#34457e")
         pri_bg = color(self.cfg, "btn_primary", "#1f6f5c")
@@ -228,7 +227,6 @@ class GridWindow(QMainWindow):
         self.btn_settings.setStyleSheet(normal_qss)
         self.btn_fill.setStyleSheet(primary_qss)
 
-        # 图标
         ai = icon_size(self.cfg, "app_icon")
         ti = icon_size(self.cfg, "toolbar")
         keep = color(self.cfg, "logo_icon_keep", False)
@@ -286,7 +284,7 @@ class GridWindow(QMainWindow):
             else:
                 cell = EmbedCell(i, self.cfg)
                 cell.requestSwap.connect(self.swap_cells)
-                cell.requestLaunch.connect(self.launch_into_cell)
+                cell.requestLaunch.connect(self.pick_into_cell)
                 cell.requestRelease.connect(self.release_cell)
             self.cells.append(cell)
             self.grid.addWidget(cell, i // cols, i % cols)
@@ -330,44 +328,46 @@ class GridWindow(QMainWindow):
         a.give(info_b)
         b.give(info_a)
 
-    # ---- 启动 / 扫描 ----
-    def launch_into_cell(self, index):
+    # ---- 选择嵌入 ----
+    def _embedded_hwnds(self):
+        return {c.child_hwnd for c in self.cells if c.child_hwnd}
+
+    def pick_into_cell(self, index):
+        """双击空槽：弹选择器，选一个窗口嵌入该槽。"""
         if index >= len(self.cells):
             return
         cell = self.cells[index]
         if cell.child_hwnd is not None:
             return
-        try:
-            hwnd = vscode_manager.launch_new_vscode()
-        except FileNotFoundError as e:
-            QMessageBox.warning(self, "启动失败", str(e))
-            return
-        if hwnd:
-            cell.attach(hwnd)
-        else:
-            QMessageBox.warning(self, "启动超时", "等待 VSCode 窗口出现超时，请重试。")
+        dlg = WindowPicker(exclude=self._embedded_hwnds(), multi=False, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            hwnds = dlg.selected_hwnds()
+            if hwnds:
+                cell.attach(hwnds[0])
 
-    def fill_empty_cells(self):
+    def pick_and_fill(self):
+        """嵌入窗口：弹选择器，多选后依次填入空槽。"""
         empty = [c for c in self.cells if c.child_hwnd is None]
         if not empty:
+            QMessageBox.information(self, "提示", "当前没有空槽可以填充。")
             return
-        for cell in empty:
-            try:
-                hwnd = vscode_manager.launch_new_vscode()
-            except FileNotFoundError as e:
-                QMessageBox.warning(self, "启动失败", str(e))
-                return
-            if hwnd:
-                cell.attach(hwnd)
+        dlg = WindowPicker(exclude=self._embedded_hwnds(), multi=True, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            hwnds = dlg.selected_hwnds()
+            for cell in empty:
+                if not hwnds:
+                    break
+                cell.attach(hwnds.pop(0))
 
     def scan_and_attach(self):
-        embedded = {c.child_hwnd for c in self.cells if c.child_hwnd}
+        """扫描填充：把当前所有可嵌入窗口自动塞进空槽。"""
+        embedded = self._embedded_hwnds()
         available = [
-            hwnd for hwnd, _ in win32_utils.find_vscode_windows()
+            hwnd for hwnd, _ in win32_utils.find_embeddable_windows()
             if hwnd not in embedded
         ]
         if not available:
-            QMessageBox.information(self, "扫描结果", "没有发现可嵌入的独立 VSCode 窗口。")
+            QMessageBox.information(self, "扫描结果", "没有发现可嵌入的窗口。")
             return
         for cell in self.cells:
             if not available:
@@ -420,5 +420,4 @@ class GridWindow(QMainWindow):
         self.watcher.stop()
         for cell in self.cells:
             cell.detach()
-        vscode_manager.cleanup_profiles()
         super().closeEvent(event)

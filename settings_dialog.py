@@ -30,7 +30,7 @@ class SettingsDialog(QDialog):
         tip = QLabel(
             "按序号列出已嵌入的窗口。某个窗口卡死时，点对应行的按钮：\n"
             "释放 = 变回独立窗口    关闭 = 正常关闭    强制关闭 = 只强行关这一个\n"
-            "注意：VSCode 多窗口共用一个进程，无法用杀进程方式只结束单个窗口。"
+            "注意：某些应用多窗口共用一个进程，不能用杀进程方式只结束单个窗口。"
         )
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#9aa3c0; font-size:12px;")
