@@ -420,4 +420,5 @@ class GridWindow(QMainWindow):
         self.watcher.stop()
         for cell in self.cells:
             cell.detach()
+        vscode_manager.cleanup_profiles()
         super().closeEvent(event)
