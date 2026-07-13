@@ -4,14 +4,12 @@ import sys
 
 
 def _resource_dir():
-    """只读资源目录：打包后是 PyInstaller 临时目录，开发时是源码目录"""
     if getattr(sys, "frozen", False):
         return sys._MEIPASS
     return os.path.dirname(os.path.abspath(__file__))
 
 
 def _data_dir():
-    """用户数据目录：打包后是 exe 所在目录，开发时是源码目录"""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
@@ -20,28 +18,25 @@ def _data_dir():
 RESOURCE_DIR = _resource_dir()
 BASE_DIR = _data_dir()
 
-ICON_DIR = os.path.join(RESOURCE_DIR, "icon", "1")   # 只读资源
-LOG_DIR = os.path.join(BASE_DIR, "logs")             # 日志输出
+ICON_DIR = os.path.join(RESOURCE_DIR, "icon", "1")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 
 def font_size(cfg, key):
-    """字体实际大小 = 总大小 + 该项偏移，最小 6"""
     return max(6, cfg["font_base"] + cfg["font_offsets"].get(key, 0))
 
 
 def icon_size(cfg, key):
-    """图标实际大小 = 总大小 + 该项偏移，最小 8"""
     return max(8, cfg["icon_base"] + cfg["icon_offsets"].get(key, 0))
 
 
 def color(cfg, key, default="#ffffff"):
-    """取颜色配置，缺失时返回 default"""
     return cfg.get("colors", {}).get(key, default)
 
 
 # === CONFIG START (debug 工具会覆盖这一段，请勿手改) ===
 DEFAULT_CFG = {
-    "window_title": "通用窗口网格容器",
+    "window_title": "VSCode 窗口网格容器",
     "win_w": 1440,
     "win_h": 920,
     "default_grid": "2 x 2 (4)",
@@ -49,6 +44,13 @@ DEFAULT_CFG = {
     "header_height": 30,
     "enforce_interval": 250,
     "watcher_interval": 70,
+    "resize_enabled": True,
+    "split_primary": "rows",
+    "sync_inner": False,
+    "sync_mode": "delta",
+    "collapse_threshold": 160,
+    "custom_rows": 2,
+    "custom_cols": 3,
     "font_base": 12,
     "icon_base": 18,
     "font_offsets": {

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """全局深色样式与配色常量，主程序和 debug 工具共用。"""
 
-# 配色常量（供代码内拼接局部样式用）
 APP_BG = "#1a1a2e"
 PANEL_BG = "#16213e"
 HOST_BG = "#0e1525"
@@ -14,7 +13,6 @@ ACCENT = "#7ee0c0"
 GOLD = "#ffd166"
 DROP_BG = "#16344a"
 
-# 全局样式表
 STYLE = """
 QMainWindow, QWidget { background:#1a1a2e; color:#e8e8e8; }
 QLabel { color:#cfcfe0; }
@@ -42,6 +40,10 @@ QPushButton#primary { background:#1f6f5c; }
 QPushButton#primary:hover { background:#2a8a72; }
 QPushButton#iconBtn { background:transparent; padding:4px; border-radius:4px; }
 QPushButton#iconBtn:hover { background:#2a3a6a; }
+QPushButton#toggleBar {
+    background:#16213e; border:1px solid #2a3a6a; border-radius:11px;
+}
+QPushButton#toggleBar:hover { background:#22305c; }
 
 QSpinBox, QLineEdit {
     background:#0e1525; color:#d0e0f0;
@@ -58,13 +60,29 @@ QPlainTextEdit {
     background:#0e1525; color:#d0e0f0; border:none;
     font-family:Consolas, monospace; font-size:13px;
 }
+QListWidget {
+    background:#0e1525; color:#d0e0f0;
+    border:1px solid #2a3a6a; border-radius:6px; padding:4px;
+}
+QListWidget::item { padding:7px 8px; border-radius:4px; }
+QListWidget::item:selected { background:#2a3a6a; color:#ffffff; }
+QListWidget::item:hover { background:#22305c; }
 QMenu { background:#16213e; color:#e8e8e8; border:1px solid #2a3a6a; }
 QMenu::item { padding:6px 24px 6px 12px; }
 QMenu::item:selected { background:#2a3a6a; }
 QDockWidget { color:#cfcfe0; titlebar-close-icon:none; }
 QDockWidget::title { background:#16213e; padding:6px 10px; }
+QMessageBox { background:#1a1a2e; }
+QCheckBox { color:#cfcfe0; }
 
-/* VSCode 风格滚动条：细、无箭头、滑块半透明、hover 加深 */
+/* 可拖拽分隔条 */
+QSplitter::handle { background:#243056; }
+QSplitter::handle:hover { background:#7ee0c0; }
+QSplitter::handle:horizontal { width:6px; }
+QSplitter::handle:vertical { height:6px; }
+QSplitter::handle:disabled { background:#1a2540; }
+
+/* VSCode 风格滚动条 */
 QScrollBar:vertical { background:transparent; width:16px; margin:0; }
 QScrollBar:horizontal { background:transparent; height:14px; margin:0; }
 QScrollBar::handle:vertical {

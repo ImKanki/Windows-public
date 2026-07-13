@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
-"""设置 / 窗口管理对话框：按序号列出已嵌入窗口，处理卡死窗口。继承全局 STYLE。"""
+"""设置 / 窗口管理对话框：分割方向、联动方式、调整开关 + 按序号管理已嵌入窗口。"""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -21,16 +25,52 @@ class SettingsDialog(QDialog):
         super().__init__(grid_window)
         self.gw = grid_window
         self.setWindowTitle("设置 / 窗口管理")
-        self.resize(540, 440)
+        self.resize(560, 560)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
+        # ---- 拖拽 / 分割 ----
+        split_box = QGroupBox("拖拽 / 分割")
+        sf = QFormLayout(split_box)
+
+        self.resize_chk = QCheckBox("允许拖拽分隔条调整窗口大小")
+        self.resize_chk.setChecked(self.gw.cfg.get("resize_enabled", True))
+        self.resize_chk.toggled.connect(self._toggle_resize)
+        sf.addRow(self.resize_chk)
+
+        self.primary_combo = QComboBox()
+        self.primary_combo.addItem("先分行（左右每行可独立调整）", "rows")
+        self.primary_combo.addItem("先分列（上下每列可独立调整）", "cols")
+        cur = self.gw.cfg.get("split_primary", "rows")
+        self.primary_combo.setCurrentIndex(1 if cur == "cols" else 0)
+        self.primary_combo.currentIndexChanged.connect(self._change_primary)
+        sf.addRow("主分割方向", self.primary_combo)
+
+        self.sync_chk = QCheckBox()
+        self.sync_chk.setChecked(self.gw.cfg.get("sync_inner", False))
+        self.sync_chk.toggled.connect(self._toggle_sync)
+        sf.addRow("独立方向联动", self.sync_chk)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("增量（其他同向移动相同距离，不复位）", "delta")
+        self.mode_combo.addItem("复位（其他对齐到相同位置）", "reset")
+        self.mode_combo.setCurrentIndex(
+            1 if self.gw.cfg.get("sync_mode", "delta") == "reset" else 0
+        )
+        self.mode_combo.currentIndexChanged.connect(self._change_mode)
+        sf.addRow("联动方式", self.mode_combo)
+
+        root.addWidget(split_box)
+        self._update_sync_label()
+
         tip = QLabel(
-            "按序号列出已嵌入的窗口。某个窗口卡死时，点对应行的按钮：\n"
-            "释放 = 变回独立窗口    关闭 = 正常关闭    强制关闭 = 只强行关这一个\n"
-            "注意：某些应用多窗口共用一个进程，不能用杀进程方式只结束单个窗口。"
+            "说明：嵌套分隔条只能让一个方向“每行/每列独立”，另一个方向是贯穿联动。\n"
+            "想上下独立就选“先分列”，想左右独立就选“先分行”。\n"
+            "对独立的那个方向可开启联动，并选增量或复位。\n\n"
+            "下面按序号管理已嵌入窗口：释放=变回独立窗口，关闭=正常关闭，"
+            "强制关闭=只强行关这一个。"
         )
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#9aa3c0; font-size:12px;")
@@ -56,6 +96,31 @@ class SettingsDialog(QDialog):
         root.addLayout(bottom)
 
         self.refresh()
+
+    def _update_sync_label(self):
+        primary = self.gw.cfg.get("split_primary", "rows")
+        # 独立方向是内层：rows→列(左右)，cols→行(上下)
+        if primary == "cols":
+            self.sync_chk.setText("上下联动（拖一列的行边界，其他列跟随）")
+        else:
+            self.sync_chk.setText("左右联动（拖一行的列边界，其他行跟随）")
+        self.mode_combo.setEnabled(self.sync_chk.isChecked())
+
+    def _toggle_resize(self, on):
+        self.gw.cfg["resize_enabled"] = bool(on)
+        self.gw._apply_resize_enabled()
+
+    def _change_primary(self, _idx):
+        self.gw.cfg["split_primary"] = self.primary_combo.currentData()
+        self._update_sync_label()
+        self.gw.rebuild_layout()
+
+    def _toggle_sync(self, on):
+        self.gw.cfg["sync_inner"] = bool(on)
+        self.mode_combo.setEnabled(on)
+
+    def _change_mode(self, _idx):
+        self.gw.cfg["sync_mode"] = self.mode_combo.currentData()
 
     def refresh(self):
         while self.list_layout.count():

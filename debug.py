@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """调试工具：停靠面板实时调字体/图标/尺寸/颜色/行为，并把配置保存回 config.py。"""
-import json
+import pprint
 import re
 import sys
 
@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 )
 
 import config
-import win32_utils
 from grid_window import GRID_PRESETS, GridWindow
 from styles import STYLE
 
@@ -45,7 +44,6 @@ ICON_LABELS = {
     "drag": "槽位拖动手柄",
 }
 
-# 颜色项：key -> 显示名
 COLOR_LABELS = {
     "logo_grad_start": "Logo 矩形·渐变起",
     "logo_grad_end": "Logo 矩形·渐变止",
@@ -75,7 +73,6 @@ class ColorButton(QPushButton):
         self.clicked.connect(self._pick)
 
     def _refresh(self):
-        # 用文字显示色值，背景填该色，自动选黑/白前景
         c = QColor(self._value)
         fg = "#000000" if c.lightnessF() > 0.6 else "#ffffff"
         self.setText(self._value)
@@ -117,7 +114,7 @@ class DebugPanel(QDockWidget):
         layout.addWidget(name_box)
 
         # ---- 界面尺寸 ----
-        size_box = QGroupBox("界面尺寸")
+        size_box = QGroupBox("界面尺寸 / 拖拽")
         sf = QFormLayout(size_box)
         self.w_spin = self._spin(600, 4000, cfg["win_w"])
         self.h_spin = self._spin(400, 3000, cfg["win_h"])
@@ -129,10 +126,13 @@ class DebugPanel(QDockWidget):
         self.toolbar_spin.valueChanged.connect(self._set_toolbar_h)
         self.header_spin = self._spin(20, 60, cfg["header_height"])
         self.header_spin.valueChanged.connect(self._set_header_h)
+        self.collapse_spin = self._spin(0, 600, cfg.get("collapse_threshold", 160))
+        self.collapse_spin.valueChanged.connect(self._set_collapse)
         sf.addRow("窗口宽", self.w_spin)
         sf.addRow("窗口高", self.h_spin)
         sf.addRow("工具栏高度", self.toolbar_spin)
         sf.addRow("槽位标题高度", self.header_spin)
+        sf.addRow("吸附折叠阈值(px)", self.collapse_spin)
         layout.addWidget(size_box)
 
         # ---- 颜色 ----
@@ -240,6 +240,10 @@ class DebugPanel(QDockWidget):
         self.win.cfg["header_height"] = n
         self.win.apply_config()
 
+    def _set_collapse(self, n):
+        self.win.cfg["collapse_threshold"] = n
+        self.win._apply_collapse_threshold()
+
     def _set_color(self, key, value):
         self.win.cfg.setdefault("colors", {})[key] = value
         self.win.apply_config()
@@ -281,7 +285,7 @@ class DebugPanel(QDockWidget):
 
     def _save_config(self):
         path = config.__file__
-        body = json.dumps(self.win.cfg, indent=4, ensure_ascii=False)
+        body = pprint.pformat(self.win.cfg, indent=4, width=100, sort_dicts=False)
         new_block = (
             "# === CONFIG START (debug 工具会覆盖这一段，请勿手改) ===\n"
             "DEFAULT_CFG = " + body + "\n"
@@ -311,8 +315,6 @@ def main():
     win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, panel)
     win.resize(win.cfg["win_w"] + 360, win.cfg["win_h"])
     win.show()
-    win32_utils.register_own_hwnd(int(win.winId()))
-    win32_utils.register_own_hwnd(int(panel.winId()))
 
     sys.exit(app.exec())
 

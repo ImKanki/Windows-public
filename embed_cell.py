@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
-"""单个网格槽位：承载嵌入的外部窗口，支持拖出释放、拖入换位、巡检。"""
+"""单个网格槽位：承载嵌入窗口，支持拖出释放、拖入换位、右键弹出、输入修复、巡检。"""
 from PySide6.QtCore import Qt, QMimeData, QSize, QTimer, Signal
 from PySide6.QtGui import QColor, QDrag, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+import fixwindows
 import icons
 import styles
 import win32_utils
@@ -19,24 +21,41 @@ from config import font_size, icon_size
 
 
 class HostWidget(QWidget):
-    """嵌入窗口的承载区。尺寸一变就回调，确保嵌入窗口实时填满。"""
+    """嵌入窗口的承载区。尺寸一变就回调，点击时把焦点交给嵌入窗口。
 
-    def __init__(self, on_resize, parent=None):
+    不透明绘制 + 纯色背景，缩放时露出区域被立即填充，避免残留。
+    """
+
+    def __init__(self, on_resize, on_click, parent=None):
         super().__init__(parent)
         self._on_resize = on_resize
+        self._on_click = on_click
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        self.setAutoFillBackground(True)
+        self._bg = QColor(styles.HOST_BG)
         self.setStyleSheet(f"background:{styles.HOST_BG};")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def paintEvent(self, event):
+        # 直接以纯色填充，保证缩放过程中露出的区域即时被覆盖
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self._bg)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._on_resize()
 
+    def mousePressEvent(self, event):
+        self._on_click()
+        super().mousePressEvent(event)
+
 
 class DragHeader(QWidget):
     """槽位标题栏：序号徽标 + 拖动图标 + 标题，右侧关闭按钮。
 
-    拖到另一个槽位松手 -> 换位；拖到容器外松手 -> 释放为独立窗口。
+    拖到另一槽松手 -> 换位；拖到容器外松手 -> 释放；右键 -> 弹出确认。
     """
 
     requestRelease = Signal(int)
@@ -119,6 +138,20 @@ class DragHeader(QWidget):
     def set_number(self, n):
         self.badge.setText(str(n))
 
+    def contextMenuEvent(self, event):
+        if not self.has_window:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("弹出窗口")
+        box.setText("是否将此窗口弹出为独立窗口？")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        box.setEscapeButton(QMessageBox.StandardButton.No)
+        if box.exec() == QMessageBox.StandardButton.Yes:
+            self.requestRelease.emit(self.index)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._press = event.position().toPoint()
@@ -166,6 +199,7 @@ class EmbedCell(QFrame):
         self.cfg = cfg
         self.child_hwnd = None
         self.original_style = None
+        self._input_thread = 0
         self.setAcceptDrops(True)
         self.setObjectName("embedCell")
         self._normal = (
@@ -178,7 +212,7 @@ class EmbedCell(QFrame):
         )
         self.setStyleSheet(self._normal)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(140, 100)
+        self.setMinimumSize(46, 40)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -189,20 +223,22 @@ class EmbedCell(QFrame):
         self.header.requestRelease.connect(self.requestRelease)
         layout.addWidget(self.header)
 
-        self.host = HostWidget(self.reposition, self)
+        self.host = HostWidget(self.reposition, self._focus_child, self)
         layout.addWidget(self.host, 1)
 
-        self.placeholder = QLabel("把外部窗口拖到这里\n或双击选择窗口", self.host)
+        self.placeholder = QLabel("把窗口拖到这里\n或双击选择窗口嵌入", self.host)
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setStyleSheet("color:#566080; font-size:13px;")
 
         self._update_header()
 
-    # ---- 配置 ----
     def apply_config(self):
         self.header.apply_config()
 
-    # ---- 标题 / 序号 ----
+    def _focus_child(self):
+        if self.child_hwnd:
+            fixwindows.focus_child(self.child_hwnd)
+
     def set_index(self, index):
         self.index = index
         self.header.index = index
@@ -222,19 +258,25 @@ class EmbedCell(QFrame):
     def _on_close_clicked(self):
         self.detach()
 
-    # ---- 嵌入 / 释放 / 换位 ----
     def attach(self, hwnd):
         if self.child_hwnd is not None:
             self.detach()
+        if win32_utils.get_parent(hwnd):
+            fixwindows.fix_stuck_window(hwnd)
         self.child_hwnd = hwnd
         parent_hwnd = int(self.host.winId())
         self.original_style = win32_utils.embed_window(hwnd, parent_hwnd)
+        self._input_thread = fixwindows.attach_input(hwnd)
         self.placeholder.hide()
         self._update_header()
         self.reposition()
         QTimer.singleShot(50, self.reposition)
+        QTimer.singleShot(80, self._focus_child)
 
     def detach(self):
+        if self._input_thread:
+            fixwindows.detach_input(self._input_thread)
+            self._input_thread = 0
         if self.child_hwnd is not None:
             win32_utils.release_window(self.child_hwnd, self.original_style)
         self.child_hwnd = None
@@ -243,12 +285,18 @@ class EmbedCell(QFrame):
         self._update_header()
 
     def clear_slot(self):
+        if self._input_thread:
+            fixwindows.detach_input(self._input_thread)
+            self._input_thread = 0
         self.child_hwnd = None
         self.original_style = None
         self.placeholder.show()
         self._update_header()
 
     def take(self):
+        if self._input_thread:
+            fixwindows.detach_input(self._input_thread)
+            self._input_thread = 0
         info = (self.child_hwnd, self.original_style)
         self.child_hwnd = None
         self.original_style = None
@@ -263,9 +311,11 @@ class EmbedCell(QFrame):
         if hwnd is not None:
             parent_hwnd = int(self.host.winId())
             win32_utils.embed_window(hwnd, parent_hwnd)
+            self._input_thread = fixwindows.attach_input(hwnd)
             self.placeholder.hide()
             self.reposition()
             QTimer.singleShot(50, self.reposition)
+            QTimer.singleShot(80, self._focus_child)
         else:
             self.placeholder.show()
         self._update_header()
@@ -291,7 +341,6 @@ class EmbedCell(QFrame):
     def set_drop_highlight(self, on):
         self.setStyleSheet(self._hover if on else self._normal)
 
-    # ---- 事件 ----
     def mouseDoubleClickEvent(self, event):
         if self.child_hwnd is None:
             self.requestLaunch.emit(self.index)
