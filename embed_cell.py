@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""单个网格槽位：承载嵌入窗口，支持拖出释放、拖入换位、右键弹出、输入修复、巡检。"""
+"""Single workspace cell that hosts one external application window."""
+
 from PySide6.QtCore import Qt, QMimeData, QSize, QTimer, Signal
 from PySide6.QtGui import QColor, QDrag, QPainter, QPixmap
 from PySide6.QtWidgets import (
@@ -13,18 +14,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import fixwindows
 import icons
 import styles
 import win32_utils
 from config import font_size, icon_size
+from window_manager import ManagedWindowBinding, WindowManager
 
 
 class HostWidget(QWidget):
-    """嵌入窗口的承载区。尺寸一变就回调，点击时把焦点交给嵌入窗口。
-
-    不透明绘制 + 纯色背景，缩放时露出区域被立即填充，避免残留。
-    """
+    """Native HWND host; resize and enforce share this widget's coordinates."""
 
     def __init__(self, on_resize, on_click, parent=None):
         super().__init__(parent)
@@ -36,10 +34,12 @@ class HostWidget(QWidget):
         self.setAutoFillBackground(True)
         self._bg = QColor(styles.HOST_BG)
         self.setStyleSheet(f"background:{styles.HOST_BG};")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
 
     def paintEvent(self, event):
-        # 直接以纯色填充，保证缩放过程中露出的区域即时被覆盖
         painter = QPainter(self)
         painter.fillRect(self.rect(), self._bg)
 
@@ -53,10 +53,7 @@ class HostWidget(QWidget):
 
 
 class DragHeader(QWidget):
-    """槽位标题栏：序号徽标 + 拖动图标 + 标题，右侧关闭按钮。
-
-    拖到另一槽松手 -> 换位；拖到容器外松手 -> 释放；右键 -> 弹出确认。
-    """
+    """Cell header: drag to swap/release, right-click to release."""
 
     requestRelease = Signal(int)
 
@@ -69,83 +66,107 @@ class DragHeader(QWidget):
         self.setObjectName("dragHeader")
         self._press = None
 
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(7, 0, 6, 0)
-        lay.setSpacing(7)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(7, 0, 6, 0)
+        layout.setSpacing(7)
 
         self.badge = QLabel(str(index + 1))
         self.badge.setObjectName("badge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.badge)
+        layout.addWidget(self.badge)
 
         self.drag_icon = QLabel()
         self.drag_icon.setObjectName("dragIcon")
-        lay.addWidget(self.drag_icon)
+        layout.addWidget(self.drag_icon)
 
         self.title = QLabel("（空）")
         self.title.setObjectName("cellTitle")
-        lay.addWidget(self.title, 1)
+        layout.addWidget(self.title, 1)
 
         self.btn_close = QToolButton()
         self.btn_close.setObjectName("cellClose")
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.setToolTip("释放为独立窗口")
-        lay.addWidget(self.btn_close)
+        layout.addWidget(self.btn_close)
 
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.apply_config()
 
     def apply_config(self):
         self.setFixedHeight(self.cfg["header_height"])
-        bf = font_size(self.cfg, "badge")
-        tf = font_size(self.cfg, "cell_title")
-        bs = max(14, bf + 8)
-        self.badge.setFixedSize(bs, bs)
+        badge_font = font_size(self.cfg, "badge")
+        title_font = font_size(self.cfg, "cell_title")
+        badge_size = max(14, badge_font + 8)
+        self.badge.setFixedSize(badge_size, badge_size)
 
-        di = icon_size(self.cfg, "drag")
-        ci = icon_size(self.cfg, "close")
-        pm = icons.make_pixmap("drag", "#7a87a8", di)
-        self.drag_icon.setPixmap(pm if pm is not None else QPixmap())
-        self.btn_close.setIcon(icons.make_icon("close", "#cfcfe0", ci))
-        self.btn_close.setIconSize(QSize(ci, ci))
-        self.btn_close.setFixedSize(ci + 8, ci + 8)
-        self._apply_qss(bf, tf)
+        drag_size = icon_size(self.cfg, "drag")
+        close_size = icon_size(self.cfg, "close")
+        pixmap = icons.make_pixmap("drag", "#7a87a8", drag_size)
+        self.drag_icon.setPixmap(pixmap if pixmap is not None else QPixmap())
+        self.btn_close.setIcon(
+            icons.make_icon("close", "#cfcfe0", close_size)
+        )
+        self.btn_close.setIconSize(QSize(close_size, close_size))
+        self.btn_close.setFixedSize(close_size + 8, close_size + 8)
+        self._apply_qss(badge_font, title_font)
 
-    def _apply_qss(self, bf, tf):
-        bg = styles.HEADER_ACTIVE if self.active else styles.HEADER_IDLE
+    def _apply_qss(self, badge_font, title_font):
+        background = (
+            styles.HEADER_ACTIVE if self.active else styles.HEADER_IDLE
+        )
         self.setStyleSheet(
             f"""
-            QWidget#dragHeader {{ background:{bg};
-                border-top-left-radius:5px; border-top-right-radius:5px; }}
-            QLabel#badge {{ background:{styles.BADGE_BG}; color:{styles.GOLD};
-                border-radius:5px; font-size:{bf}px; font-weight:bold; }}
-            QLabel#dragIcon {{ background:transparent; }}
-            QLabel#cellTitle {{ background:transparent; color:#cfcfe0;
-                font-size:{tf}px; }}
-            QToolButton#cellClose {{ border:none; background:transparent;
-                border-radius:4px; }}
-            QToolButton#cellClose:hover {{ background:#c4302b; }}
+            QWidget#dragHeader {{
+                background:{background};
+                border-top-left-radius:5px;
+                border-top-right-radius:5px;
+            }}
+            QLabel#badge {{
+                background:{styles.BADGE_BG};
+                color:{styles.GOLD};
+                border-radius:5px;
+                font-size:{badge_font}px;
+                font-weight:bold;
+            }}
+            QLabel#dragIcon {{
+                background:transparent;
+            }}
+            QLabel#cellTitle {{
+                background:transparent;
+                color:#cfcfe0;
+                font-size:{title_font}px;
+            }}
+            QToolButton#cellClose {{
+                border:none;
+                background:transparent;
+                border-radius:4px;
+            }}
+            QToolButton#cellClose:hover {{
+                background:#c4302b;
+            }}
             """
         )
 
     def set_active(self, on):
-        self.active = on
+        self.active = bool(on)
         self.apply_config()
 
     def set_has_window(self, on):
-        self.has_window = on
+        self.has_window = bool(on)
 
-    def set_number(self, n):
-        self.badge.setText(str(n))
+    def set_number(self, number):
+        self.badge.setText(str(number))
 
     def contextMenuEvent(self, event):
         if not self.has_window:
             return
+
         box = QMessageBox(self)
         box.setWindowTitle("弹出窗口")
         box.setText("是否将此窗口弹出为独立窗口？")
         box.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
         )
         box.setDefaultButton(QMessageBox.StandardButton.Yes)
         box.setEscapeButton(QMessageBox.StandardButton.No)
@@ -155,11 +176,14 @@ class DragHeader(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._press = event.position().toPoint()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._press is None:
             return
-        if (event.position().toPoint() - self._press).manhattanLength() < 10:
+        if (
+            event.position().toPoint() - self._press
+        ).manhattanLength() < 10:
             return
         if not self.has_window:
             self._press = None
@@ -176,8 +200,9 @@ class DragHeader(QWidget):
         painter.setPen(QColor("#0e1525"))
         painter.drawText(
             pixmap.rect(),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            "   " + self.title.text(),
+            Qt.AlignmentFlag.AlignVCenter
+            | Qt.AlignmentFlag.AlignLeft,
+            " " + self.title.text(),
         )
         painter.end()
         drag.setPixmap(pixmap)
@@ -197,9 +222,14 @@ class EmbedCell(QFrame):
         super().__init__(parent)
         self.index = index
         self.cfg = cfg
+        self.window_manager = WindowManager()
+        self.binding: ManagedWindowBinding | None = None
+
+        # Kept for compatibility with GridWindow/session code.
         self.child_hwnd = None
         self.original_style = None
         self._input_thread = 0
+
         self.setAcceptDrops(True)
         self.setObjectName("embedCell")
         self._normal = (
@@ -211,7 +241,10 @@ class EmbedCell(QFrame):
             f" border-radius:6px; background:{styles.DROP_BG}; }}"
         )
         self.setStyleSheet(self._normal)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.setMinimumSize(46, 40)
 
         layout = QVBoxLayout(self)
@@ -226,23 +259,38 @@ class EmbedCell(QFrame):
         self.host = HostWidget(self.reposition, self._focus_child, self)
         layout.addWidget(self.host, 1)
 
-        self.placeholder = QLabel("把窗口拖到这里\n或双击选择窗口嵌入", self.host)
+        self.placeholder = QLabel(
+            "把窗口拖到这里\n或双击选择窗口嵌入",
+            self.host,
+        )
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.placeholder.setStyleSheet("color:#566080; font-size:13px;")
-
+        self.placeholder.setStyleSheet(
+            "color:#566080; font-size:13px;"
+        )
         self._update_header()
 
     def apply_config(self):
         self.header.apply_config()
 
+    def _sync_compatibility_fields(self):
+        if self.binding is None:
+            self.child_hwnd = None
+            self.original_style = None
+            self._input_thread = 0
+        else:
+            self.child_hwnd = self.binding.hwnd
+            self.original_style = self.binding.original_style
+            self._input_thread = self.binding.input_thread
+
     def _focus_child(self):
-        if self.child_hwnd:
-            fixwindows.focus_child(self.child_hwnd)
+        self.window_manager.focus(self.binding)
 
     def set_index(self, index):
         self.index = index
         self.header.index = index
         self.header.set_number(index + 1)
+        if self.binding is not None:
+            self.binding.pane_index = index
         self._update_header()
 
     def _update_header(self):
@@ -251,7 +299,9 @@ class EmbedCell(QFrame):
             self.header.set_active(False)
             self.header.set_has_window(False)
         else:
-            self.header.title.setText(win32_utils.get_window_title(self.child_hwnd))
+            self.header.title.setText(
+                win32_utils.get_window_title(self.child_hwnd)
+            )
             self.header.set_active(True)
             self.header.set_has_window(True)
 
@@ -259,84 +309,96 @@ class EmbedCell(QFrame):
         self.detach()
 
     def attach(self, hwnd):
-        if self.child_hwnd is not None:
+        if self.binding is not None:
             self.detach()
-        if win32_utils.get_parent(hwnd):
-            fixwindows.fix_stuck_window(hwnd)
-        self.child_hwnd = hwnd
-        parent_hwnd = int(self.host.winId())
-        self.original_style = win32_utils.embed_window(hwnd, parent_hwnd)
-        self._input_thread = fixwindows.attach_input(hwnd)
+
+        self.binding = self.window_manager.attach(
+            hwnd,
+            int(self.host.winId()),
+            self.index,
+        )
+        self._sync_compatibility_fields()
+        if self.binding is None:
+            self.placeholder.show()
+            self._update_header()
+            return False
+
         self.placeholder.hide()
         self._update_header()
         self.reposition()
         QTimer.singleShot(50, self.reposition)
         QTimer.singleShot(80, self._focus_child)
+        return True
 
     def detach(self):
-        if self._input_thread:
-            fixwindows.detach_input(self._input_thread)
-            self._input_thread = 0
-        if self.child_hwnd is not None:
-            win32_utils.release_window(self.child_hwnd, self.original_style)
-        self.child_hwnd = None
-        self.original_style = None
+        if self.binding is not None:
+            self.window_manager.detach(self.binding)
+
+        self.binding = None
+        self._sync_compatibility_fields()
         self.placeholder.show()
         self._update_header()
 
     def clear_slot(self):
-        if self._input_thread:
-            fixwindows.detach_input(self._input_thread)
-            self._input_thread = 0
-        self.child_hwnd = None
-        self.original_style = None
+        if self.binding is not None:
+            self.window_manager.forget(self.binding)
+
+        self.binding = None
+        self._sync_compatibility_fields()
         self.placeholder.show()
         self._update_header()
 
     def take(self):
-        if self._input_thread:
-            fixwindows.detach_input(self._input_thread)
-            self._input_thread = 0
-        info = (self.child_hwnd, self.original_style)
-        self.child_hwnd = None
-        self.original_style = None
+        binding = self.window_manager.take(self.binding)
+        self.binding = None
+        self._sync_compatibility_fields()
         self.placeholder.show()
         self._update_header()
-        return info
+        return binding
 
-    def give(self, info):
-        hwnd, original_style = info
-        self.child_hwnd = hwnd
-        self.original_style = original_style
-        if hwnd is not None:
-            parent_hwnd = int(self.host.winId())
-            win32_utils.embed_window(hwnd, parent_hwnd)
-            self._input_thread = fixwindows.attach_input(hwnd)
+    def give(self, binding):
+        self.binding = self.window_manager.adopt(
+            binding,
+            int(self.host.winId()),
+            self.index,
+        )
+        self._sync_compatibility_fields()
+
+        if self.binding is None:
+            self.placeholder.show()
+        else:
             self.placeholder.hide()
             self.reposition()
             QTimer.singleShot(50, self.reposition)
             QTimer.singleShot(80, self._focus_child)
-        else:
-            self.placeholder.show()
+
         self._update_header()
 
     def reposition(self):
         self.placeholder.resize(self.host.size())
-        if self.child_hwnd is None:
-            return
-        win32_utils.resize_embedded(
-            self.child_hwnd, 0, 0, self.host.width(), self.host.height()
+        self.window_manager.resize(
+            self.binding,
+            self.host.width(),
+            self.host.height(),
         )
 
     def enforce(self):
-        if self.child_hwnd is None:
+        if self.binding is None:
             return
-        parent_hwnd = int(self.host.winId())
-        alive = win32_utils.enforce_embed(
-            self.child_hwnd, parent_hwnd, self.host.width(), self.host.height()
+
+        alive = self.window_manager.enforce(
+            self.binding,
+            int(self.host.winId()),
+            self.host.width(),
+            self.host.height(),
         )
         if not alive:
-            self.clear_slot()
+            self.binding = None
+            self._sync_compatibility_fields()
+            self.placeholder.show()
+            self._update_header()
+        else:
+            self._sync_compatibility_fields()
 
     def set_drop_highlight(self, on):
         self.setStyleSheet(self._hover if on else self._normal)
@@ -358,7 +420,7 @@ class EmbedCell(QFrame):
         self.set_drop_highlight(False)
         text = event.mimeData().text()
         if text.startswith("cell:"):
-            from_index = int(text.split(":")[1])
+            from_index = int(text.split(":", 1)[1])
             if from_index != self.index:
                 self.requestSwap.emit(from_index, self.index)
             event.acceptProposedAction()
