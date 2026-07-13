@@ -1,0 +1,6 @@
+2026-07-13T18:12:20 INFO window_workspace {"event": "application_start", "version": "26.0.0.4", "autofill": false}
+2026-07-13T18:12:45 INFO window_workspace {"event": "application_exit", "exit_code": 0}
+2026-07-13T18:48:54 INFO window_workspace {"event": "application_start", "version": "26.0.0.5", "autofill": false}
+2026-07-13T18:51:11 INFO window_workspace.window_manager {"event": "window_attached", "pane": 0, "hwnd": 5179680, "identity": {"pid": 45036, "thread_id": 672, "exe": "D:\\Kanki_Apps\\_Games\\steam\\steamapps\\common\\Apex Legends\\start_protected_game.exe", "title": "启动错误 (30005)", "class_name": "eac_bugreport"}, "original_parent": 0, "original_rect": [396, 369, 942, 738]}
+2026-07-13T18:51:16 INFO window_workspace.window_manager {"event": "window_detached", "hwnd": 5179680, "pane": 0, "exact_restore": true}
+2026-07-13T18:51:50 INFO window_workspace.window_manager {"event": "window_attached", "pane": 1, "hwnd": 15274460, "identity": {"pid": 12748, "thread_id": 34368, "exe": "C:\\Windows\\explorer.exe", "title": "此电脑", "class_name": "CabinetWClass"}, "original_parent": 0, "original_rect": [607, 401, 1746, 956]}

@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-"""网格主窗口：嵌套分隔条容器，支持主分割方向切换、内层增量/复位联动、吸附折叠、隐藏栏、会话记忆。"""
+"""Main adjustable workspace window with a modern, always-visible command bar."""
+
 import copy
 import ctypes
 
-from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -29,7 +29,9 @@ from drag_watcher import DragWatcher
 from embed_cell import EmbedCell
 from settings_dialog import SettingsDialog
 from split_widget import SnapSplitter
+from version import __version__
 from window_picker import WindowPicker
+
 
 GRID_PRESETS = {
     "1 x 2": (1, 2),
@@ -55,28 +57,45 @@ class GridWindow(QMainWindow):
         self._inner = []
         self._inner_last = {}
         self._sync_guard = False
-        self._toolbar_hidden = True
 
         self.setWindowTitle(self.cfg["window_title"])
         self.resize(self.cfg["win_w"], self.cfg["win_h"])
+        self.setMinimumSize(900, 620)
 
         central = QWidget()
+        central.setObjectName("appRoot")
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(10, 10, 10, 10)
-        root.setSpacing(10)
 
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
         root.addWidget(self._build_toolbar())
+
+        self.workspace_body = QWidget()
+        self.workspace_body.setObjectName("workspaceBody")
+        workspace_layout = QVBoxLayout(self.workspace_body)
+        margin = int(self.cfg.get("workspace_margin", 12))
+        workspace_layout.setContentsMargins(
+            margin,
+            margin,
+            margin,
+            max(8, margin - 2),
+        )
+        workspace_layout.setSpacing(0)
 
         self.grid_container = QWidget()
         self.grid_layout = QVBoxLayout(self.grid_container)
         self.grid_layout.setSpacing(0)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
-        root.addWidget(self.grid_container, 1)
+        workspace_layout.addWidget(self.grid_container, 1)
+        root.addWidget(self.workspace_body, 1)
+
+        root.addWidget(self._build_status_bar())
 
         start = self.cfg["default_grid"]
         if start not in GRID_PRESETS and start != CUSTOM_LABEL:
             start = "2 x 2 (4)"
+
         self.combo.blockSignals(True)
         self.combo.setCurrentText(start)
         self.combo.blockSignals(False)
@@ -93,26 +112,6 @@ class GridWindow(QMainWindow):
         self.enforce_timer.timeout.connect(self._enforce_all)
         self.enforce_timer.start()
 
-        self.toolbar.setVisible(False)
-
-        self.toggle_btn = QPushButton()
-        self.toggle_btn.setObjectName("toggleBar")
-        self.toggle_btn.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Tool
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.toggle_btn.setFixedSize(48, 22)
-        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toggle_btn.clicked.connect(self._toggle_toolbar)
-        self.toggle_btn.hide()
-        self._update_toggle_icon()
-
-        self.reveal_timer = QTimer(self)
-        self.reveal_timer.setInterval(150)
-        self.reveal_timer.timeout.connect(self._check_reveal)
-        self.reveal_timer.start()
-
         self.save_timer = QTimer(self)
         self.save_timer.setInterval(3000)
         self.save_timer.timeout.connect(self._save_session)
@@ -120,6 +119,7 @@ class GridWindow(QMainWindow):
 
         self._dark_titlebar()
         win32_utils.register_own_hwnd(int(self.winId()))
+        self._update_status()
 
         QTimer.singleShot(600, self.restore_session)
 
@@ -128,122 +128,126 @@ class GridWindow(QMainWindow):
             hwnd = int(self.winId())
             value = ctypes.c_int(1)
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 20, ctypes.byref(value), ctypes.sizeof(value)
+                hwnd,
+                20,
+                ctypes.byref(value),
+                ctypes.sizeof(value),
             )
         except Exception:
             pass
 
-    # ---- 可交互状态判断 ----
     def _visible_usable(self):
-        """窗口可见且未最小化（不要求是激活窗口）。用于拖拽吸附门控。"""
         if not self.isVisible():
             return False
         if self.windowState() & Qt.WindowState.WindowMinimized:
             return False
         return True
 
-    def _interactive(self):
-        """更严格：可见、未最小化、且是当前激活窗口。用于浮出箭头。"""
-        return self._visible_usable() and self.isActiveWindow()
-
-    # ---- 工具栏 ----
-    def _vsep(self):
-        sep = QFrame()
-        sep.setObjectName("tbSep")
-        sep.setFixedWidth(1)
-        sep.setFixedHeight(22)
-        return sep
+    # ---------- Command bar ----------
 
     def _build_toolbar(self):
         bar = QWidget()
-        bar.setObjectName("toolbar")
+        bar.setObjectName("appBar")
         self.toolbar = bar
-        self._seps = []
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(12, 8, 16, 8)
+        layout.setContentsMargins(16, 7, 14, 7)
         layout.setSpacing(10)
 
-        self.logo = QWidget()
-        self.logo.setObjectName("logoBadge")
-        logo_lay = QHBoxLayout(self.logo)
-        logo_lay.setContentsMargins(10, 5, 12, 5)
-        logo_lay.setSpacing(8)
+        brand = QWidget()
+        brand.setObjectName("brandBlock")
+        brand_layout = QHBoxLayout(brand)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(10)
 
-        self.tb_app_icon = QLabel()
-        self.tb_app_icon.setObjectName("logoIcon")
-        logo_lay.addWidget(self.tb_app_icon)
+        self.brand_mark = QLabel("W")
+        self.brand_mark.setObjectName("brandMark")
+        self.brand_mark.setFixedSize(32, 32)
+        self.brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_layout.addWidget(self.brand_mark)
 
-        self.tb_title = QLabel("窗口网格")
-        self.tb_title.setObjectName("logoText")
-        logo_lay.addWidget(self.tb_title)
+        title_stack = QVBoxLayout()
+        title_stack.setContentsMargins(0, 0, 0, 0)
+        title_stack.setSpacing(0)
 
-        layout.addWidget(self.logo)
+        self.tb_title = QLabel("Workspace")
+        self.tb_title.setObjectName("brandTitle")
+        title_stack.addWidget(self.tb_title)
 
-        layout.addSpacing(4)
-        sep1 = self._vsep()
-        self._seps.append(sep1)
-        layout.addWidget(sep1)
+        caption = QLabel("Window grid")
+        caption.setObjectName("brandCaption")
+        title_stack.addWidget(caption)
 
-        self.tb_grid_label = QLabel("网格布局")
-        self.tb_grid_label.setObjectName("fieldLabel")
-        layout.addWidget(self.tb_grid_label)
+        brand_layout.addLayout(title_stack)
+        layout.addWidget(brand)
+        layout.addSpacing(12)
+
+        layout_label = QLabel("布局")
+        layout_label.setObjectName("fieldLabel")
+        layout.addWidget(layout_label)
 
         self.combo = QComboBox()
-        self.combo.addItems(list(GRID_PRESETS.keys()) + [CUSTOM_LABEL])
-        self.combo.currentTextChanged.connect(self.on_preset_changed)
+        self.combo.setMinimumWidth(126)
+        self.combo.addItems(
+            list(GRID_PRESETS.keys()) + [CUSTOM_LABEL]
+        )
+        self.combo.currentTextChanged.connect(
+            self.on_preset_changed
+        )
         layout.addWidget(self.combo)
 
         self.custom_widget = QWidget()
-        cw = QHBoxLayout(self.custom_widget)
-        cw.setContentsMargins(0, 0, 0, 0)
-        cw.setSpacing(6)
-        lbl_r = QLabel("行")
-        lbl_r.setObjectName("fieldLabel")
-        cw.addWidget(lbl_r)
+        custom_layout = QHBoxLayout(self.custom_widget)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(6)
+
         self.row_spin = QSpinBox()
         self.row_spin.setRange(1, MAX_RC)
-        self.row_spin.setValue(self.cfg.get("custom_rows", 2))
-        cw.addWidget(self.row_spin)
-        lbl_c = QLabel("列")
-        lbl_c.setObjectName("fieldLabel")
-        cw.addWidget(lbl_c)
+        self.row_spin.setValue(
+            self.cfg.get("custom_rows", 2)
+        )
+        self.row_spin.setPrefix("行 ")
+        self.row_spin.setFixedWidth(72)
+        custom_layout.addWidget(self.row_spin)
+
         self.col_spin = QSpinBox()
         self.col_spin.setRange(1, MAX_RC)
-        self.col_spin.setValue(self.cfg.get("custom_cols", 3))
-        cw.addWidget(self.col_spin)
-        self.row_spin.valueChanged.connect(self._on_custom_changed)
-        self.col_spin.valueChanged.connect(self._on_custom_changed)
+        self.col_spin.setValue(
+            self.cfg.get("custom_cols", 3)
+        )
+        self.col_spin.setPrefix("列 ")
+        self.col_spin.setFixedWidth(72)
+        custom_layout.addWidget(self.col_spin)
+
+        self.row_spin.valueChanged.connect(
+            self._on_custom_changed
+        )
+        self.col_spin.valueChanged.connect(
+            self._on_custom_changed
+        )
         self.custom_widget.setVisible(False)
         layout.addWidget(self.custom_widget)
 
-        layout.addSpacing(4)
-        sep2 = self._vsep()
-        self._seps.append(sep2)
-        layout.addWidget(sep2)
-        layout.addSpacing(4)
+        layout.addStretch(1)
 
-        self.btn_fill = QPushButton("  嵌入窗口")
-        self.btn_fill.setObjectName("primary")
+        version_label = QLabel(f"v{__version__}")
+        version_label.setObjectName("versionPill")
+        layout.addWidget(version_label)
+
+        self.btn_fill = QPushButton("添加窗口")
+        self.btn_fill.setObjectName("primaryButton")
         self.btn_fill.clicked.connect(self.pick_and_fill)
         layout.addWidget(self.btn_fill)
 
-        self.btn_scan = QPushButton("  扫描填充")
+        self.btn_scan = QToolButton()
+        self.btn_scan.setToolTip("扫描并填充可用窗口")
         self.btn_scan.clicked.connect(self.scan_and_attach)
         layout.addWidget(self.btn_scan)
 
-        self.btn_settings = QPushButton("  设置")
+        self.btn_settings = QToolButton()
+        self.btn_settings.setToolTip("设置")
         self.btn_settings.clicked.connect(self.open_settings)
         layout.addWidget(self.btn_settings)
-
-        layout.addStretch(1)
-
-        self.tb_hint = QLabel(
-            "拖窗口标题栏入槽　·　双击空槽选择窗口　·　右键标题栏可弹出　·"
-            "　拖分隔条到边吸附折叠"
-        )
-        self.tb_hint.setObjectName("hintLabel")
-        layout.addWidget(self.tb_hint)
 
         self._apply_toolbar_config()
         return bar
@@ -251,237 +255,255 @@ class GridWindow(QMainWindow):
     def _apply_toolbar_config(self):
         self.toolbar.setFixedHeight(self.cfg["toolbar_height"])
 
-        af = font_size(self.cfg, "app_title")
-        bf = font_size(self.cfg, "button")
-        hf = font_size(self.cfg, "hint")
-
-        tb_bg = color(self.cfg, "toolbar_bg", "#16213e")
-        tb_border = color(self.cfg, "toolbar_border", "#243056")
-        self.toolbar.setStyleSheet(
-            f"QWidget#toolbar {{ background:{tb_bg};"
-            f" border:1px solid {tb_border}; border-radius:10px; }}"
+        toolbar_icon_size = icon_size(self.cfg, "toolbar")
+        primary_icon_color = color(
+            self.cfg,
+            "btn_primary_icon",
+            "#FFFFFF",
+        )
+        normal_icon_color = color(
+            self.cfg,
+            "btn_icon",
+            "#AAB3C2",
         )
 
-        for sep in self._seps:
-            sep.setStyleSheet(f"background:{tb_border};")
-
-        grad_a = color(self.cfg, "logo_grad_start", "#1f6f5c")
-        grad_b = color(self.cfg, "logo_grad_end", "#2a8a72")
-        logo_text = color(self.cfg, "logo_text", "#ffffff")
-        self.logo.setStyleSheet(
-            "QWidget#logoBadge {"
-            f" background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f" stop:0 {grad_a}, stop:1 {grad_b});"
-            " border-radius:8px; }"
-            " QLabel#logoIcon { background:transparent; }"
-            f" QLabel#logoText {{ background:transparent; color:{logo_text};"
-            f" font-size:{af}px; font-weight:bold; }}"
+        self.btn_fill.setIcon(
+            icons.make_icon(
+                "add",
+                primary_icon_color,
+                toolbar_icon_size,
+            )
         )
-        self.tb_grid_label.setStyleSheet(
-            f"QLabel#fieldLabel {{ color:#8a93b8; font-size:{bf}px;"
-            " background:transparent; }"
-        )
-        self.tb_hint.setStyleSheet(
-            f"QLabel#hintLabel {{ color:#5a6488; font-size:{hf}px;"
-            " background:transparent; }"
+        self.btn_fill.setIconSize(
+            QSize(toolbar_icon_size, toolbar_icon_size)
         )
 
-        btn_bg = color(self.cfg, "btn_bg", "#2a3a6a")
-        btn_hover = color(self.cfg, "btn_hover", "#34457e")
-        pri_bg = color(self.cfg, "btn_primary", "#1f6f5c")
-        pri_hover = color(self.cfg, "btn_primary_hover", "#2a8a72")
-        normal_qss = (
-            f"QPushButton {{ background:{btn_bg}; color:#e8e8e8; border:none;"
-            f" padding:7px 14px; border-radius:5px; font-size:{bf}px; }}"
-            f"QPushButton:hover {{ background:{btn_hover}; }}"
+        self.btn_scan.setIcon(
+            icons.make_icon(
+                "search",
+                normal_icon_color,
+                toolbar_icon_size,
+            )
         )
-        primary_qss = (
-            f"QPushButton {{ background:{pri_bg}; color:#ffffff; border:none;"
-            f" padding:7px 14px; border-radius:5px; font-size:{bf}px; }}"
-            f"QPushButton:hover {{ background:{pri_hover}; }}"
+        self.btn_scan.setIconSize(
+            QSize(toolbar_icon_size, toolbar_icon_size)
         )
-        self.btn_scan.setStyleSheet(normal_qss)
-        self.btn_settings.setStyleSheet(normal_qss)
-        self.btn_fill.setStyleSheet(primary_qss)
 
-        ai = icon_size(self.cfg, "app_icon")
-        ti = icon_size(self.cfg, "toolbar")
-        keep = color(self.cfg, "logo_icon_keep", False)
-        logo_icon_color = None if keep else color(self.cfg, "logo_icon", "#ffffff")
-        pm = icons.make_pixmap("layout", logo_icon_color, ai)
-        if pm is not None:
-            self.tb_app_icon.setPixmap(pm)
+        self.btn_settings.setIcon(
+            icons.make_icon(
+                "setting",
+                normal_icon_color,
+                toolbar_icon_size,
+            )
+        )
+        self.btn_settings.setIconSize(
+            QSize(toolbar_icon_size, toolbar_icon_size)
+        )
 
-        btn_icon = color(self.cfg, "btn_icon", "#cfd6ea")
-        pri_icon = color(self.cfg, "btn_primary_icon", "#eafff7")
-        for btn, name, col in (
-            (self.btn_fill, "add", pri_icon),
-            (self.btn_scan, "search", btn_icon),
-            (self.btn_settings, "setting", btn_icon),
-        ):
-            btn.setIcon(icons.make_icon(name, col, ti))
-            btn.setIconSize(QSize(ti, ti))
+    def _build_status_bar(self):
+        bar = QWidget()
+        bar.setObjectName("statusBar")
+        bar.setFixedHeight(self.cfg.get("status_height", 30))
 
-    # ---- 隐藏栏 / 悬停浮出 ----
-    def _update_toggle_icon(self):
-        name = "down" if self._toolbar_hidden else "upward"
-        self.toggle_btn.setIcon(icons.make_icon(name, "#cfd6ea", 16))
-        self.toggle_btn.setIconSize(QSize(16, 16))
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 0, 14, 0)
+        layout.setSpacing(12)
 
-    def _toggle_toolbar(self):
-        self._toolbar_hidden = not self._toolbar_hidden
-        self.toolbar.setVisible(not self._toolbar_hidden)
-        self._update_toggle_icon()
-        QTimer.singleShot(0, self._reposition_all)
+        self.status_summary = QLabel()
+        self.status_summary.setObjectName("statusSummary")
+        layout.addWidget(self.status_summary)
 
-    def _place_toggle(self):
-        central = self.centralWidget()
-        if central is None:
+        layout.addStretch(1)
+
+        hint = QLabel(
+            "拖入标题栏 · 双击空窗口 · 拖动顶部可交换 · ⋯ 管理窗口"
+        )
+        hint.setObjectName("statusHint")
+        layout.addWidget(hint)
+
+        return bar
+
+    def _update_status(self):
+        if not hasattr(self, "status_summary"):
             return
-        tl = central.mapToGlobal(central.rect().topLeft())
-        x = tl.x() + central.width() // 2 - self.toggle_btn.width() // 2
-        y = tl.y() + 2
-        self.toggle_btn.move(x, y)
-
-    def _check_reveal(self):
-        central = self.centralWidget()
-        if central is None or not self._interactive():
-            self.toggle_btn.hide()
-            return
-        tl = central.mapToGlobal(central.rect().topLeft())
-        pos = QCursor.pos()
-        cx = tl.x() + central.width() // 2
-        in_zone = abs(pos.x() - cx) <= 110 and tl.y() <= pos.y() <= tl.y() + 40
-        over_btn = (
-            self.toggle_btn.isVisible()
-            and self.toggle_btn.geometry().contains(pos)
+        connected = sum(
+            1 for cell in self.cells if cell.child_hwnd
         )
-        if in_zone or over_btn:
-            self._place_toggle()
-            self.toggle_btn.show()
-            self.toggle_btn.raise_()
-        else:
-            self.toggle_btn.hide()
+        self.status_summary.setText(
+            f"{self.rows} × {self.cols}  ·  "
+            f"{connected}/{len(self.cells)} 个窗口已连接"
+        )
 
-    # ---- 配置刷新（debug / 设置 调用）----
+    # ---------- Configuration ----------
+
     def apply_config(self):
         self.setWindowTitle(self.cfg["window_title"])
         self._apply_toolbar_config()
+
+        margin = int(self.cfg.get("workspace_margin", 12))
+        layout = self.workspace_body.layout()
+        layout.setContentsMargins(
+            margin,
+            margin,
+            margin,
+            max(8, margin - 2),
+        )
+
         for cell in self.cells:
             cell.apply_config()
+
         self._apply_collapse_threshold()
-        self.enforce_timer.setInterval(self.cfg["enforce_interval"])
-        self.watcher.timer.setInterval(self.cfg["watcher_interval"])
+        self.enforce_timer.setInterval(
+            self.cfg["enforce_interval"]
+        )
+        self.watcher.timer.setInterval(
+            self.cfg["watcher_interval"]
+        )
 
     def rebuild_layout(self):
-        """主分割方向改变后，用当前行列重建结构。"""
         if self.rows and self.cols:
             self.apply_layout(self.rows, self.cols)
 
-    # ---- 布局：预设 / 自定义 ----
+    # ---------- Grid layout ----------
+
     def on_preset_changed(self, name):
         if name == CUSTOM_LABEL:
             self.custom_widget.setVisible(True)
             self.cfg["default_grid"] = CUSTOM_LABEL
-            r = self.cfg.get("custom_rows", 2)
-            c = self.cfg.get("custom_cols", 3)
-            self.apply_layout(r, c)
-        else:
-            self.custom_widget.setVisible(False)
-            self.cfg["default_grid"] = name
-            rows, cols = GRID_PRESETS[name]
+            rows = self.cfg.get("custom_rows", 2)
+            cols = self.cfg.get("custom_cols", 3)
             self.apply_layout(rows, cols)
+            return
+
+        self.custom_widget.setVisible(False)
+        self.cfg["default_grid"] = name
+        rows, cols = GRID_PRESETS[name]
+        self.apply_layout(rows, cols)
 
     def _on_custom_changed(self):
-        r = self.row_spin.value()
-        c = self.col_spin.value()
-        self.cfg["custom_rows"] = r
-        self.cfg["custom_cols"] = c
+        rows = self.row_spin.value()
+        cols = self.col_spin.value()
+        self.cfg["custom_rows"] = rows
+        self.cfg["custom_cols"] = cols
+
         if self.combo.currentText() == CUSTOM_LABEL:
-            self.apply_layout(r, c)
+            self.apply_layout(rows, cols)
 
     def apply_layout(self, rows, cols):
         rows = max(1, min(MAX_RC, rows))
         cols = max(1, min(MAX_RC, cols))
         new_count = rows * cols
-        old_cells = self.cells
 
+        old_cells = self.cells
         for cell in old_cells[new_count:]:
             cell.detach()
 
         cells = []
-        for i in range(new_count):
-            if i < len(old_cells):
-                cell = old_cells[i]
-                cell.set_index(i)
+        for index in range(new_count):
+            if index < len(old_cells):
+                cell = old_cells[index]
+                cell.set_index(index)
             else:
-                cell = EmbedCell(i, self.cfg)
+                cell = EmbedCell(index, self.cfg)
                 cell.requestSwap.connect(self.swap_cells)
                 cell.requestLaunch.connect(self.pick_into_cell)
                 cell.requestRelease.connect(self.release_cell)
+                cell.requestClose.connect(self.close_cell)
+                cell.requestForceClose.connect(
+                    self.confirm_force_close_cell
+                )
             cells.append(cell)
 
         removed = old_cells[new_count:]
         self.cells = cells
         self.rows = rows
         self.cols = cols
+
         self._rebuild_splitters(rows, cols, removed)
+        self._update_status()
 
     def _rebuild_splitters(self, rows, cols, removed=()):
         for cell in self.cells:
             cell.setParent(None)
+
         if self.root_split is not None:
             self.root_split.setParent(None)
             self.root_split.deleteLater()
+
         for cell in removed:
             cell.setParent(None)
             cell.deleteLater()
 
-        th = self.cfg.get("collapse_threshold", 160)
+        threshold = self.cfg.get("collapse_threshold", 160)
         primary = self.cfg.get("split_primary", "rows")
+
         self._splitters = []
         self._inner = []
         self._inner_last = {}
 
         if primary == "cols":
-            # 外层水平分列（列联动贯穿），内层每列垂直分行（行可独立）
-            outer = SnapSplitter(Qt.Orientation.Horizontal, th, self._reposition_all)
-            outer.setObjectName("gridSplit")
-            for c in range(cols):
+            outer = SnapSplitter(
+                Qt.Orientation.Horizontal,
+                threshold,
+                self._reposition_all,
+            )
+            outer.setObjectName("workspaceSplit")
+
+            for column in range(cols):
                 inner = SnapSplitter(
-                    Qt.Orientation.Vertical, th, self._reposition_all
+                    Qt.Orientation.Vertical,
+                    threshold,
+                    self._reposition_all,
                 )
                 inner.splitterMoved.connect(
-                    lambda pos, idx, s=inner: self._on_inner_moved(s)
+                    lambda pos, idx, split=inner:
+                    self._on_inner_moved(split)
                 )
                 self._inner.append(inner)
-                for r in range(rows):
-                    inner.addWidget(self.cells[r * cols + c])
+
+                for row in range(rows):
+                    inner.addWidget(
+                        self.cells[row * cols + column]
+                    )
                 inner.setSizes([10000] * rows)
                 outer.addWidget(inner)
+
             outer.setSizes([10000] * cols)
+
         else:
-            # 外层垂直分行（行联动贯穿），内层每行水平分列（列可独立）
-            outer = SnapSplitter(Qt.Orientation.Vertical, th, self._reposition_all)
-            outer.setObjectName("gridSplit")
-            for r in range(rows):
+            outer = SnapSplitter(
+                Qt.Orientation.Vertical,
+                threshold,
+                self._reposition_all,
+            )
+            outer.setObjectName("workspaceSplit")
+
+            for row in range(rows):
                 inner = SnapSplitter(
-                    Qt.Orientation.Horizontal, th, self._reposition_all
+                    Qt.Orientation.Horizontal,
+                    threshold,
+                    self._reposition_all,
                 )
                 inner.splitterMoved.connect(
-                    lambda pos, idx, s=inner: self._on_inner_moved(s)
+                    lambda pos, idx, split=inner:
+                    self._on_inner_moved(split)
                 )
                 self._inner.append(inner)
-                for c in range(cols):
-                    inner.addWidget(self.cells[r * cols + c])
+
+                for column in range(cols):
+                    inner.addWidget(
+                        self.cells[row * cols + column]
+                    )
                 inner.setSizes([10000] * cols)
                 outer.addWidget(inner)
+
             outer.setSizes([10000] * rows)
 
         self._splitters = [outer] + self._inner
         self.root_split = outer
         self.grid_layout.addWidget(outer)
         self._apply_resize_enabled()
+
         QTimer.singleShot(0, self._reposition_all)
         QTimer.singleShot(0, self._sync_splitters)
         QTimer.singleShot(0, self._refresh_inner_snapshots)
@@ -490,69 +512,89 @@ class GridWindow(QMainWindow):
         QTimer.singleShot(350, self._reposition_all)
 
     def _on_inner_moved(self, source):
-        """内层联动：把源分隔条的移动同步到其他内层分隔条（增量或复位）。"""
         if self._sync_guard:
             self._inner_last[source] = source.sizes()
             return
+
         if not self.cfg.get("sync_inner", False):
             self._inner_last[source] = source.sizes()
             self._reposition_all()
             return
 
-        cur = source.sizes()
-        prev = self._inner_last.get(source)
+        current = source.sizes()
+        previous = self._inner_last.get(source)
         mode = self.cfg.get("sync_mode", "delta")
 
         self._sync_guard = True
         try:
             for other in self._inner:
-                if other is source or other.count() != len(cur):
+                if other is source or other.count() != len(current):
                     continue
-                if mode == "reset" or not prev or len(prev) != len(cur):
-                    other.set_sizes_synced(cur)
+
+                if (
+                    mode == "reset"
+                    or not previous
+                    or len(previous) != len(current)
+                ):
+                    other.set_sizes_synced(current)
                 else:
-                    os = other.sizes()
-                    new = [
-                        max(0, os[i] + (cur[i] - prev[i]))
-                        for i in range(len(cur))
+                    other_sizes = other.sizes()
+                    new_sizes = [
+                        max(
+                            0,
+                            other_sizes[index]
+                            + current[index]
+                            - previous[index],
+                        )
+                        for index in range(len(current))
                     ]
-                    other.set_sizes_synced(new)
+                    other.set_sizes_synced(new_sizes)
+
                 self._inner_last[other] = other.sizes()
         finally:
             self._sync_guard = False
 
-        self._inner_last[source] = cur
+        self._inner_last[source] = current
         self._reposition_all()
 
     def _refresh_inner_snapshots(self):
-        for s in self._inner:
-            self._inner_last[s] = s.sizes()
+        for splitter in self._inner:
+            self._inner_last[splitter] = splitter.sizes()
 
     def _sync_splitters(self):
-        for split in self._splitters:
-            split.sync_last()
+        for splitter in self._splitters:
+            splitter.sync_last()
 
     def _apply_collapse_threshold(self):
-        th = self.cfg.get("collapse_threshold", 160)
-        for split in self._splitters:
-            split.set_threshold(th)
+        threshold = self.cfg.get("collapse_threshold", 160)
+        for splitter in self._splitters:
+            splitter.set_threshold(threshold)
 
     def _apply_resize_enabled(self):
         enabled = self.cfg.get("resize_enabled", True)
-        for split in self._splitters:
-            split.setHandleWidth(6 if enabled else 2)
-            for i in range(1, split.count()):
-                handle = split.handle(i)
+
+        for splitter in self._splitters:
+            splitter.setHandleWidth(7 if enabled else 2)
+
+            for index in range(1, splitter.count()):
+                handle = splitter.handle(index)
                 if handle is None:
                     continue
+
                 handle.setEnabled(enabled)
-                if enabled:
-                    if split.orientation() == Qt.Orientation.Horizontal:
-                        handle.setCursor(Qt.CursorShape.SizeHorCursor)
-                    else:
-                        handle.setCursor(Qt.CursorShape.SizeVerCursor)
-                else:
+                if not enabled:
                     handle.setCursor(Qt.CursorShape.ArrowCursor)
+                elif (
+                    splitter.orientation()
+                    == Qt.Orientation.Horizontal
+                ):
+                    handle.setCursor(
+                        Qt.CursorShape.SizeHorCursor
+                    )
+                else:
+                    handle.setCursor(
+                        Qt.CursorShape.SizeVerCursor
+                    )
 
     def _reposition_all(self):
         for cell in self.cells:
@@ -561,91 +603,139 @@ class GridWindow(QMainWindow):
     def _enforce_all(self):
         for cell in self.cells:
             cell.enforce()
+        self._update_status()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 窗口尺寸变化会改变各分隔条内部尺寸，刷新快照避免下次增量同步算错
         if self._inner:
             self._refresh_inner_snapshots()
 
-    # ---- 拖拽吸附回调 ----
+    # ---------- Drag and drop ----------
+
     def _on_drag_hover(self, index):
         if not self._visible_usable():
             for cell in self.cells:
                 cell.set_drop_highlight(False)
             return
+
         for cell in self.cells:
             cell.set_drop_highlight(cell.index == index)
 
     def _on_drag_drop(self, hwnd, index):
         for cell in self.cells:
             cell.set_drop_highlight(False)
+
         if not self._visible_usable():
             return
+
         if 0 <= index < len(self.cells):
             self.cells[index].attach(hwnd)
             self._save_session()
+            self._update_status()
 
-    # ---- 换位 ----
+    # ---------- Cell operations ----------
+
     def swap_cells(self, from_index, to_index):
-        if from_index >= len(self.cells) or to_index >= len(self.cells):
+        if (
+            from_index >= len(self.cells)
+            or to_index >= len(self.cells)
+        ):
             return
-        a = self.cells[from_index]
-        b = self.cells[to_index]
-        info_a = a.take()
-        info_b = b.take()
-        a.give(info_b)
-        b.give(info_a)
-        self._save_session()
 
-    # ---- 选择嵌入 ----
+        source = self.cells[from_index]
+        target = self.cells[to_index]
+
+        source_binding = source.take()
+        target_binding = target.take()
+        source.give(target_binding)
+        target.give(source_binding)
+
+        self._save_session()
+        self._update_status()
+
     def _embedded_hwnds(self):
-        return {c.child_hwnd for c in self.cells if c.child_hwnd}
+        return {
+            cell.child_hwnd
+            for cell in self.cells
+            if cell.child_hwnd
+        }
 
     def pick_into_cell(self, index):
         if index >= len(self.cells):
             return
+
         cell = self.cells[index]
         if cell.child_hwnd is not None:
             return
-        dlg = WindowPicker(exclude=self._embedded_hwnds(), multi=False, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            hwnds = dlg.selected_hwnds()
-            if hwnds:
-                cell.attach(hwnds[0])
+
+        dialog = WindowPicker(
+            exclude=self._embedded_hwnds(),
+            multi=False,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected = dialog.selected_hwnds()
+            if selected:
+                cell.attach(selected[0])
                 self._save_session()
+                self._update_status()
 
     def pick_and_fill(self):
-        empty = [c for c in self.cells if c.child_hwnd is None]
+        empty = [
+            cell
+            for cell in self.cells
+            if cell.child_hwnd is None
+        ]
         if not empty:
-            QMessageBox.information(self, "提示", "当前没有空槽可以填充。")
+            QMessageBox.information(
+                self,
+                "没有空窗口",
+                "当前工作区没有可用的空窗口。",
+            )
             return
-        dlg = WindowPicker(exclude=self._embedded_hwnds(), multi=True, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            hwnds = dlg.selected_hwnds()
+
+        dialog = WindowPicker(
+            exclude=self._embedded_hwnds(),
+            multi=True,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected = dialog.selected_hwnds()
             for cell in empty:
-                if not hwnds:
+                if not selected:
                     break
-                cell.attach(hwnds.pop(0))
+                cell.attach(selected.pop(0))
+
             self._save_session()
+            self._update_status()
 
     def scan_and_attach(self):
         embedded = self._embedded_hwnds()
         available = [
-            hwnd for hwnd, _ in win32_utils.find_embeddable_windows()
+            hwnd
+            for hwnd, _ in win32_utils.find_embeddable_windows()
             if hwnd not in embedded
         ]
+
         if not available:
-            QMessageBox.information(self, "扫描结果", "没有发现可嵌入的窗口。")
+            QMessageBox.information(
+                self,
+                "扫描完成",
+                "没有发现可添加的应用窗口。",
+            )
             return
+
         for cell in self.cells:
             if not available:
                 break
             if cell.child_hwnd is None:
                 cell.attach(available.pop(0))
-        self._save_session()
 
-    # ---- 会话记忆 ----
+        self._save_session()
+        self._update_status()
+
+    # ---------- Session ----------
+
     def _save_session(self):
         session.save_session(self.cells)
 
@@ -653,87 +743,126 @@ class GridWindow(QMainWindow):
         data = session.load_session()
         slots = data.get("slots", [])
         if not slots:
+            self._update_status()
             return
+
         used = set()
         candidates = win32_utils.find_embeddable_windows()
+
         for slot in slots:
-            idx = slot.get("index", -1)
-            if not (0 <= idx < len(self.cells)):
+            index = slot.get("index", -1)
+            if not 0 <= index < len(self.cells):
                 continue
-            if self.cells[idx].child_hwnd is not None:
+            if self.cells[index].child_hwnd is not None:
                 continue
-            want_exe = (slot.get("exe") or "").lower()
-            want_title = slot.get("title") or ""
-            if not want_exe:
+
+            expected_exe = (slot.get("exe") or "").lower()
+            expected_title = slot.get("title") or ""
+            if not expected_exe:
                 continue
+
             best = None
             for hwnd, title in candidates:
                 if hwnd in used:
                     continue
-                ex = (win32_utils.get_window_exe(hwnd) or "").lower()
-                if ex == want_exe:
-                    if title == want_title:
-                        best = hwnd
-                        break
-                    if best is None:
-                        best = hwnd
+
+                actual_exe = (
+                    win32_utils.get_window_exe(hwnd) or ""
+                ).lower()
+                if actual_exe != expected_exe:
+                    continue
+
+                if title == expected_title:
+                    best = hwnd
+                    break
+
+                if best is None:
+                    best = hwnd
+
             if best:
                 used.add(best)
                 fixwindows.fix_stuck_window(best)
-                self.cells[idx].attach(best)
-        self._save_session()
+                self.cells[index].attach(best)
 
-    # ---- 窗口管理 ----
+        self._save_session()
+        self._update_status()
+
+    # ---------- Window lifecycle ----------
+
     def release_cell(self, index):
         if 0 <= index < len(self.cells):
             self.cells[index].detach()
             self._save_session()
+            self._update_status()
 
     def close_cell(self, index):
         if 0 <= index < len(self.cells):
             cell = self.cells[index]
             if cell.child_hwnd:
                 win32_utils.close_window(cell.child_hwnd)
-                cell.clear_slot()
-                self._save_session()
+            cell.clear_slot()
+            self._save_session()
+            self._update_status()
+
+    def confirm_force_close_cell(self, index):
+        if not 0 <= index < len(self.cells):
+            return
+
+        result = QMessageBox.question(
+            self,
+            "确认强制关闭",
+            "未保存内容可能丢失。确定强制关闭这个窗口吗？",
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self.force_close_cell(index)
 
     def force_close_cell(self, index):
         if 0 <= index < len(self.cells):
             cell = self.cells[index]
             if cell.child_hwnd:
-                win32_utils.force_close_window(cell.child_hwnd)
-                cell.clear_slot()
-                self._save_session()
+                win32_utils.force_close_window(
+                    cell.child_hwnd
+                )
+            cell.clear_slot()
+            self._save_session()
+            self._update_status()
 
     def open_settings(self):
-        dlg = SettingsDialog(self)
-        dlg.exec()
+        dialog = SettingsDialog(self)
+        dialog.exec()
+        self._update_status()
 
-    # ---- debug 用统计 ----
     def usage_stats(self):
-        embedded = [c for c in self.cells if c.child_hwnd]
+        embedded = [
+            cell for cell in self.cells if cell.child_hwnd
+        ]
         lines = [
-            f"网格: {self.rows} x {self.cols}（共 {len(self.cells)} 格）",
+            f"版本: {__version__}",
+            f"网格: {self.rows} x {self.cols}"
+            f"（共 {len(self.cells)} 格）",
             f"已嵌入窗口: {len(embedded)}",
             "-" * 30,
         ]
-        for c in self.cells:
-            if c.child_hwnd:
+        for cell in self.cells:
+            if cell.child_hwnd:
                 lines.append(
-                    f"[{c.index + 1}] {win32_utils.get_window_title(c.child_hwnd)}"
+                    f"[{cell.index + 1}] "
+                    f"{win32_utils.get_window_title(cell.child_hwnd)}"
                 )
             else:
-                lines.append(f"[{c.index + 1}] （空）")
+                lines.append(
+                    f"[{cell.index + 1}] （空）"
+                )
         return "\n".join(lines)
 
     def closeEvent(self, event):
         self._save_session()
-        self.reveal_timer.stop()
         self.save_timer.stop()
         self.enforce_timer.stop()
         self.watcher.stop()
-        self.toggle_btn.close()
+
         for cell in self.cells:
             cell.detach()
+
         QApplication.processEvents()
         super().closeEvent(event)

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""SVG 图标加载并重新染色，找不到 svg 时回退到系统符号。"""
+"""SVG icon loading and neutral monochrome fallbacks."""
+
 import os
 
 from PySide6.QtCore import QRect, Qt
@@ -8,63 +9,93 @@ from PySide6.QtSvg import QSvgRenderer
 
 from config import ICON_DIR
 
-# svg 缺失时的系统符号回退（Windows 自带字体可显示）
+
 FALLBACK = {
-    "drag": "≡", "close": "✕", "add": "＋", "file-add": "＋",
-    "search": "⌕", "scanning": "⊙", "setting": "⚙", "layout": "▦",
-    "refresh": "↻", "sign-out": "⏏", "warning": "⚠", "move": "✥",
+    "drag": "⋮⋮",
+    "close": "×",
+    "add": "+",
+    "file-add": "+",
+    "search": "⌕",
+    "scanning": "◎",
+    "setting": "⚙",
+    "layout": "▦",
+    "refresh": "↻",
+    "sign-out": "↗",
+    "warning": "!",
+    "move": "↕",
+    "more": "•••",
+    "window": "▣",
+    "trash": "×",
+    "power": "⏻",
+    "info": "i",
+    "monitor": "▤",
+    "sliders": "☷",
+    "help": "?",
+    "check": "✓",
+    "down": "⌄",
+    "upward": "⌃",
 }
 
 
 def _svg_path(name):
-    p = os.path.join(ICON_DIR, name + ".svg")
-    return p if os.path.exists(p) else None
+    path = os.path.join(ICON_DIR, name + ".svg")
+    return path if os.path.exists(path) else None
 
 
-def make_pixmap(name, color="#cfcfe0", size=20):
-    """读取 name.svg 重染成 color，返回 QPixmap；无 svg 时用回退符号；都没有返回 None。"""
+def make_pixmap(name, color="#aab3c2", size=20):
+    """Return a recolored SVG pixmap, or a restrained text fallback."""
     size = max(4, int(size))
     path = _svg_path(name)
+
     if path:
         renderer = QSvgRenderer(path)
         base = QPixmap(size, size)
         base.fill(Qt.GlobalColor.transparent)
-        p = QPainter(base)
-        renderer.render(p)
-        p.end()
+
+        painter = QPainter(base)
+        renderer.render(painter)
+        painter.end()
 
         if color is None:
             return base
 
         colored = QPixmap(size, size)
         colored.fill(Qt.GlobalColor.transparent)
-        p = QPainter(colored)
-        p.drawPixmap(0, 0, base)
-        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        p.fillRect(colored.rect(), QColor(color))
-        p.end()
+        painter = QPainter(colored)
+        painter.drawPixmap(0, 0, base)
+        painter.setCompositionMode(
+            QPainter.CompositionMode.CompositionMode_SourceIn
+        )
+        painter.fillRect(colored.rect(), QColor(color))
+        painter.end()
         return colored
 
-    sym = FALLBACK.get(name, "")
-    if not sym:
+    symbol = FALLBACK.get(name, "")
+    if not symbol:
         return None
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    f = QFont()
-    f.setPixelSize(int(size * 0.8))
-    p.setFont(f)
-    p.setPen(QColor(color or "#cfcfe0"))
-    p.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, sym)
-    p.end()
-    return pm
+
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+
+    font = QFont("Segoe UI Symbol")
+    font.setPixelSize(max(8, int(size * 0.72)))
+    font.setWeight(QFont.Weight.Medium)
+    painter.setFont(font)
+    painter.setPen(QColor(color or "#aab3c2"))
+    painter.drawText(
+        QRect(0, 0, size, size),
+        Qt.AlignmentFlag.AlignCenter,
+        symbol,
+    )
+    painter.end()
+    return pixmap
 
 
-def make_icon(name, color="#cfcfe0", size=20):
-    pm = make_pixmap(name, color, size)
-    return QIcon(pm) if pm is not None else QIcon()
+def make_icon(name, color="#aab3c2", size=20):
+    pixmap = make_pixmap(name, color, size)
+    return QIcon(pixmap) if pixmap is not None else QIcon()
 
 
 def char(name):
-    """供纯文本场景使用的回退符号。"""
     return FALLBACK.get(name, "")
